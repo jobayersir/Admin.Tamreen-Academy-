@@ -28,7 +28,7 @@ export interface Question {
   correct_option: number; // 0, 1, 2, 3
   explanation: string;
   subject: Subject;
-  topic: string;
+  topic?: string;
   cadre_tier: CadreTier;
   difficulty: Difficulty;
   usage_count?: number;
@@ -85,12 +85,17 @@ export interface Course {
 export interface UserProfile {
   id: string;
   name: string;
+  full_name?: string;
   phone: string;
   email: string;
   role: 'admin' | 'student';
   is_vip: boolean;
-  cadre_target: CadreTier;
+  cadre_target?: CadreTier;
+  target_cadre?: CadreTier;
   subscription_expires_at?: string;
+  vip_expiry?: string;
+  total_attempts?: number;
+  average_score?: number;
   created_at: string;
 }
 
@@ -110,9 +115,13 @@ export interface WrittenQuestion {
 export interface GlossaryTerm {
   id: string;
   term_ar: string;
-  root_word: string; // মাদ্দাহ
-  meaning_bn: string;
-  example_usage: string;
+  term_bn?: string;
+  root_word?: string; // মাদ্দাহ
+  meaning_bn?: string;
+  definition_bn?: string;
+  example_ar?: string;
+  example_bn?: string;
+  example_usage?: string;
   subject: Subject;
   created_at: string;
 }
@@ -120,14 +129,19 @@ export interface GlossaryTerm {
 export interface ResourceFile {
   id: string;
   title: string;
-  category: Subject | 'General';
-  file_type: 'pdf' | 'doc' | 'sheet';
-  url: string;
-  size_mb: number;
+  category?: Subject | 'General';
+  subject?: Subject;
+  file_type?: 'pdf' | 'doc' | 'sheet';
+  url?: string;
+  file_url?: string;
+  size_mb?: number;
+  file_size?: string;
   is_vip_only: boolean;
   download_count: number;
   created_at: string;
 }
+
+export type LectureSheet = ResourceFile;
 
 export interface SystemStats {
   totalQuestions: number;

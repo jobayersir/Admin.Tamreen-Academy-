@@ -239,6 +239,7 @@ const AdminAppContent: React.FC = () => {
         correct_option: Number(quickMcqData.correct_option),
         explanation: quickMcqData.explanation,
         subject: quickMcqData.subject,
+        topic: 'সাধারণ',
         cadre_tier: quickMcqData.cadre_tier,
         difficulty: quickMcqData.difficulty,
         usage_count: 0
@@ -272,11 +273,15 @@ const AdminAppContent: React.FC = () => {
       />
 
       {/* Main Layout Area */}
-      <div className="lg:pl-64 flex flex-col min-h-screen">
+      <div className="lg:pl-72 flex flex-col min-h-screen">
         {/* Top Header Controls */}
         <TopBar
           onOpenSidebar={() => setIsSidebarOpen(true)}
           activeTab={activeTab}
+          setActiveTab={(tab) => {
+            setActiveTab(tab);
+            setIsSidebarOpen(false);
+          }}
           isDarkMode={isDarkMode}
           onToggleDarkMode={() => setIsDarkMode(!isDarkMode)}
           isSupabaseConnected={isSupabaseConnected}
