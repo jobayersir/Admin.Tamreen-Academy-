@@ -11,7 +11,8 @@ import {
   Code2,
   Moon,
   Sun,
-  Plus
+  Plus,
+  CreditCard
 } from 'lucide-react';
 import { isSupabaseConfigured } from '../lib/supabase';
 import { TabId } from './Sidebar';
@@ -25,6 +26,7 @@ interface TopBarProps {
   isSupabaseConnected?: boolean;
   onOpenSupabaseModal: () => void;
   onQuickAddMCQ?: () => void;
+  onOpenPayments?: () => void;
   searchQuery?: string;
   setSearchQuery?: (q: string) => void;
   darkMode?: boolean;
@@ -39,6 +41,7 @@ export const TopBar: React.FC<TopBarProps> = ({
   onToggleDarkMode,
   onOpenSupabaseModal,
   onQuickAddMCQ,
+  onOpenPayments,
   searchQuery = '',
   setSearchQuery,
   darkMode,
@@ -102,6 +105,18 @@ export const TopBar: React.FC<TopBarProps> = ({
           >
             <Plus className="w-3.5 h-3.5" />
             <span>নতুন MCQ</span>
+          </button>
+        )}
+
+        {/* Payment Management Button */}
+        {onOpenPayments && (
+          <button
+            onClick={onOpenPayments}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-emerald-300 border border-emerald-500/30 text-xs font-semibold transition-all active:scale-95"
+            title="পেমেন্ট হিস্ট্রি ও ম্যানুয়াল ফি ট্রানজেকশন"
+          >
+            <CreditCard className="w-3.5 h-3.5 text-emerald-400" />
+            <span>পেমেন্ট ও ফি</span>
           </button>
         )}
 

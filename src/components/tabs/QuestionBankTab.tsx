@@ -12,19 +12,25 @@ import {
   Layers,
   Award,
   ChevronRight,
-  X
+  X,
+  Clock
 } from 'lucide-react';
-import { Question, Subject, CadreTier, Difficulty } from '../../types';
+import { Question, Subject, CadreTier, Difficulty, DEFAULT_SUBJECTS } from '../../types';
+import { SubjectSelector } from '../SubjectSelector';
 import { useToast } from '../Toast';
 
 interface Props {
   questions: Question[];
+  customSubjects: string[];
+  onAddCustomSubject: (subject: string) => void;
   onSaveQuestion: (q: Omit<Question, 'id' | 'created_at'> & { id?: string }) => Promise<void>;
   onDeleteQuestion: (id: string) => Promise<void>;
 }
 
 export const QuestionBankTab: React.FC<Props> = ({
   questions,
+  customSubjects = [],
+  onAddCustomSubject,
   onSaveQuestion,
   onDeleteQuestion
 }) => {
@@ -51,19 +57,13 @@ export const QuestionBankTab: React.FC<Props> = ({
     explanation: '',
     subject: 'বালাগাত ও মানতিক' as Subject,
     topic: 'সাধারণ',
+    time_limit_seconds: 60,
+    marks: 1,
     cadre_tier: 'প্রভাষক (আরবি)' as CadreTier,
     difficulty: 'মাঝারি' as Difficulty
   });
 
-  const subjectsList: Subject[] = [
-    'বালাগাত ও মানতিক',
-    'আল-কুরআন',
-    'হাদিস',
-    'ফিকহ্ ও উসুল',
-    'বাংলা',
-    'ইংরেজি',
-    'আইসিটি ও সাধারণ জ্ঞান'
-  ];
+  const allSubjects = Array.from(new Set([...DEFAULT_SUBJECTS, ...customSubjects]));
 
   const cadreTiersList: CadreTier[] = [
     'প্রভাষক (আরবি)',
@@ -103,6 +103,8 @@ export const QuestionBankTab: React.FC<Props> = ({
       explanation: '',
       subject: 'বালাগাত ও মানতিক',
       topic: 'সাধারণ',
+      time_limit_seconds: 60,
+      marks: 1,
       cadre_tier: 'প্রভাষক (আরবি)',
       difficulty: 'মাঝারি'
     });
@@ -122,7 +124,9 @@ export const QuestionBankTab: React.FC<Props> = ({
       correct_option: q.correct_option,
       explanation: q.explanation,
       subject: q.subject,
-      topic: q.topic || '',
+      topic: q.topic || 'সাধারণ',
+      time_limit_seconds: q.time_limit_seconds || 60,
+      marks: q.marks || 1,
       cadre_tier: q.cadre_tier,
       difficulty: q.difficulty
     });
@@ -140,6 +144,8 @@ export const QuestionBankTab: React.FC<Props> = ({
         explanation: q.explanation,
         subject: q.subject,
         topic: q.topic,
+        time_limit_seconds: q.time_limit_seconds || 60,
+        marks: q.marks || 1,
         cadre_tier: q.cadre_tier,
         difficulty: q.difficulty,
         usage_count: 0
@@ -182,6 +188,8 @@ export const QuestionBankTab: React.FC<Props> = ({
         explanation: formData.explanation,
         subject: formData.subject,
         topic: formData.topic,
+        time_limit_seconds: Number(formData.time_limit_seconds) || 60,
+        marks: Number(formData.marks) || 1,
         cadre_tier: formData.cadre_tier,
         difficulty: formData.difficulty
       });
@@ -203,7 +211,7 @@ export const QuestionBankTab: React.FC<Props> = ({
             মাস্টার প্রশ্ন ব্যাংক ({questions.length}টি MCQ)
           </h2>
           <p className="text-xs text-slate-400 mt-1">
-            আরবি ও বাংলা কিওয়ার্ড, বিষয়, ক্যাডার টার্গেট এবং ডিফিকাল্টি লেভেল অনুযায়ী ফিল্টার ও এডিট করুন।
+            আরবি ও বাংলা কিওয়ার্ড, বিষয়, টপিক, সময়সীমা ও ক্যাডার টার্গেট অনুযায়ী ফিল্টার ও এডিট করুন।
           </p>
         </div>
 
@@ -224,7 +232,7 @@ export const QuestionBankTab: React.FC<Props> = ({
             type="text"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            placeholder="আরবি বা বাংলা কিওয়ার্ড দিয়ে খুঁজুন..."
+            placeholder="আরবি বা বাংলা কিওয়ার্ড দিয়ে খুঁজুন..."
             className="w-full bg-slate-900 text-slate-100 text-xs rounded-xl pl-9 pr-4 py-2.5 border border-slate-800 focus:border-emerald-500 focus:outline-none"
           />
         </div>
@@ -235,7 +243,7 @@ export const QuestionBankTab: React.FC<Props> = ({
           className="bg-slate-900 text-slate-200 text-xs rounded-xl px-3 py-2.5 border border-slate-800 focus:border-emerald-500 focus:outline-none"
         >
           <option value="All">সব বিষয় (All Subjects)</option>
-          {subjectsList.map((s) => (
+          {allSubjects.map((s) => (
             <option key={s} value={s}>{s}</option>
           ))}
         </select>
@@ -285,6 +293,13 @@ export const QuestionBankTab: React.FC<Props> = ({
                     টপিক: {q.topic}
                   </span>
                 )}
+                <span className="px-2 py-0.5 rounded bg-slate-800 text-emerald-400 font-mono flex items-center gap-1">
+                  <Clock className="w-3 h-3" />
+                  সময়সীমা: {q.time_limit_seconds || 60} সে
+                </span>
+                <span className="px-2 py-0.5 rounded bg-slate-800 text-amber-300 font-mono">
+                  নম্বর: {q.marks || 1}
+                </span>
               </div>
 
               <div className="flex items-center gap-2 text-[10px] text-slate-400">
@@ -293,7 +308,7 @@ export const QuestionBankTab: React.FC<Props> = ({
                 }`}>
                   ডিফিকাল্টি: {q.difficulty}
                 </span>
-                <span>মডেল টেস্টে ব্যবহার: {q.usage_count || 0} বার</span>
+                <span>ব্যবহার: {q.usage_count || 0} বার</span>
               </div>
             </div>
 
@@ -395,20 +410,28 @@ export const QuestionBankTab: React.FC<Props> = ({
             </h3>
 
             <form onSubmit={handleSubmit} className="space-y-4 text-xs">
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                <div>
-                  <label className="block text-slate-300 font-medium mb-1">বিষয় (Subject) *</label>
-                  <select
-                    value={formData.subject}
-                    onChange={(e) => setFormData({ ...formData, subject: e.target.value as Subject })}
-                    className="w-full bg-slate-950 border border-slate-800 rounded-xl p-2.5 text-slate-100 focus:border-emerald-500 focus:outline-none"
-                  >
-                    {subjectsList.map((s) => (
-                      <option key={s} value={s}>{s}</option>
-                    ))}
-                  </select>
-                </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <SubjectSelector
+                  selectedSubject={formData.subject}
+                  onChangeSubject={(s) => setFormData({ ...formData, subject: s })}
+                  customSubjects={customSubjects}
+                  onAddCustomSubject={onAddCustomSubject}
+                  label="বিষয় (Subject) *"
+                />
 
+                <div>
+                  <label className="block text-slate-300 font-medium mb-1">টপিক (Topic)</label>
+                  <input
+                    type="text"
+                    value={formData.topic}
+                    onChange={(e) => setFormData({ ...formData, topic: e.target.value })}
+                    placeholder="যেমন: ইস্তিয়ারা ও তাশবীহ"
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl p-2.5 text-slate-100 focus:border-emerald-500 focus:outline-none"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                 <div>
                   <label className="block text-slate-300 font-medium mb-1">ক্যাডার টার্গেট *</label>
                   <select
@@ -423,17 +446,40 @@ export const QuestionBankTab: React.FC<Props> = ({
                 </div>
 
                 <div>
-                  <label className="block text-slate-300 font-medium mb-1">ডিফিকাল্টি</label>
-                  <select
-                    value={formData.difficulty}
-                    onChange={(e) => setFormData({ ...formData, difficulty: e.target.value as Difficulty })}
-                    className="w-full bg-slate-950 border border-slate-800 rounded-xl p-2.5 text-slate-100 focus:border-emerald-500 focus:outline-none"
-                  >
-                    {difficultyList.map((d) => (
-                      <option key={d} value={d}>{d}</option>
-                    ))}
-                  </select>
+                  <label className="block text-slate-300 font-medium mb-1">সময়সীমা (সেকেন্ড) *</label>
+                  <input
+                    type="number"
+                    value={formData.time_limit_seconds}
+                    onChange={(e) => setFormData({ ...formData, time_limit_seconds: Number(e.target.value) })}
+                    placeholder="যেমন: 60"
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl p-2.5 text-emerald-300 font-mono font-bold focus:border-emerald-500 focus:outline-none"
+                    required
+                  />
                 </div>
+
+                <div>
+                  <label className="block text-slate-300 font-medium mb-1">নম্বর (Marks)</label>
+                  <input
+                    type="number"
+                    value={formData.marks}
+                    onChange={(e) => setFormData({ ...formData, marks: Number(e.target.value) })}
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl p-2.5 text-amber-300 font-mono font-bold"
+                    required
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-slate-300 font-medium mb-1">ডিফিকাল্টি</label>
+                <select
+                  value={formData.difficulty}
+                  onChange={(e) => setFormData({ ...formData, difficulty: e.target.value as Difficulty })}
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl p-2.5 text-slate-100 focus:border-emerald-500 focus:outline-none"
+                >
+                  {difficultyList.map((d) => (
+                    <option key={d} value={d}>{d}</option>
+                  ))}
+                </select>
               </div>
 
               <div>

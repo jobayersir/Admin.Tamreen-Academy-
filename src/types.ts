@@ -3,14 +3,17 @@
  * NTRCA Arabic Cadre, Lecturer, & Assistant Teacher Prep Platform
  */
 
-export type Subject = 
-  | 'আল-কুরআন'
-  | 'হাদিস'
-  | 'ফিকহ্ ও উসুল'
-  | 'বালাগাত ও মানতিক'
-  | 'বাংলা'
-  | 'ইংরেজি'
-  | 'আইসিটি ও সাধারণ জ্ঞান';
+export type Subject = string;
+
+export const DEFAULT_SUBJECTS: string[] = [
+  'বালাগাত ও মানতিক',
+  'আল-কুরআন',
+  'হাদিস',
+  'ফিকহ্ ও উসুল',
+  'বাংলা',
+  'ইংরেজি',
+  'আইসিটি ও সাধারণ জ্ঞান'
+];
 
 export type CadreTier = 
   | 'প্রভাষক (আরবি)'
@@ -29,6 +32,8 @@ export interface Question {
   explanation: string;
   subject: Subject;
   topic?: string;
+  time_limit_seconds?: number; // সময়সীমা (সেকেন্ড)
+  marks?: number; // নম্বর
   cadre_tier: CadreTier;
   difficulty: Difficulty;
   usage_count?: number;
@@ -58,12 +63,34 @@ export interface CourseLesson {
   pdf_url?: string;
   quiz_id?: string;
   is_free_preview?: boolean;
+  duration_minutes?: number;
+}
+
+export interface CourseModuleQuestion {
+  id: string;
+  question_bn: string;
+  question_ar?: string;
+  options: [string, string, string, string];
+  correct_option: number;
+  explanation?: string;
+  subject: Subject;
+  topic?: string;
+  time_limit_seconds?: number;
+  marks?: number;
+  cadre_tier?: CadreTier;
+  difficulty?: Difficulty;
 }
 
 export interface CourseModule {
   id: string;
   title: string;
+  description?: string;
+  subject?: Subject;
+  topic?: string;
+  time_limit_minutes?: number;
+  total_marks?: number;
   lessons: CourseLesson[];
+  questions?: CourseModuleQuestion[];
 }
 
 export interface Course {
@@ -170,4 +197,18 @@ export interface WrittenEvaluationResult {
   arabic_corrections?: string;
   strengths: string[];
   improvements: string[];
+}
+
+export interface PaymentTransaction {
+  id: string;
+  student_name: string;
+  student_phone: string;
+  student_email: string;
+  payment_method: 'bKash' | 'Nagad' | 'Rocket' | 'Bank' | 'Cash';
+  transaction_id: string;
+  amount: number;
+  plan_name: string;
+  status: 'pending' | 'verified' | 'rejected';
+  notes?: string;
+  created_at: string;
 }

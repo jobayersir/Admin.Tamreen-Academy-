@@ -3,6 +3,7 @@ import { Sidebar, TabId } from './components/Sidebar';
 import { TopBar } from './components/TopBar';
 import { ToastProvider, useToast } from './components/Toast';
 import { SupabaseSetupModal } from './components/SupabaseSetupModal';
+import { PaymentModal } from './components/PaymentModal';
 
 // Tabs
 import { DashboardTab } from './components/tabs/DashboardTab';
@@ -48,9 +49,10 @@ import {
   UserProfile,
   Subject,
   CadreTier,
-  Difficulty
+  Difficulty,
+  PaymentTransaction
 } from './types';
-import { Database, Plus, X } from 'lucide-react';
+import { Database, Plus, X, CreditCard } from 'lucide-react';
 
 const AdminAppContent: React.FC = () => {
   const { showToast } = useToast();
@@ -61,6 +63,30 @@ const AdminAppContent: React.FC = () => {
   const [isDarkMode, setIsDarkMode] = useState(true);
   const [isSupabaseConnected, setIsSupabaseConnected] = useState(false);
   const [isSetupModalOpen, setIsSetupModalOpen] = useState(false);
+
+  // Payment Modal State
+  const [isPaymentModalOpen, setIsPaymentModalOpen] = useState(false);
+
+  // Custom Subjects State
+  const [customSubjects, setCustomSubjects] = useState<string[]>(() => {
+    try {
+      const saved = localStorage.getItem('tamreen_custom_subjects');
+      return saved ? JSON.parse(saved) : [];
+    } catch {
+      return [];
+    }
+  });
+
+  const handleAddCustomSubject = (newSubject: string) => {
+    if (!newSubject.trim()) return;
+    setCustomSubjects((prev) => {
+      if (prev.includes(newSubject)) return prev;
+      const updated = [...prev, newSubject];
+      localStorage.setItem('tamreen_custom_subjects', JSON.stringify(updated));
+      return updated;
+    });
+    showToast('Subject Added', `"${newSubject}" নতুন বিষয় হিসেবে যুক্ত হয়েছে।`, 'success');
+  };
 
   // Data Collections State
   const [questions, setQuestions] = useState<Question[]>([]);
@@ -287,6 +313,7 @@ const AdminAppContent: React.FC = () => {
           isSupabaseConnected={isSupabaseConnected}
           onOpenSupabaseModal={() => setIsSetupModalOpen(true)}
           onQuickAddMCQ={() => setIsQuickMcqOpen(true)}
+          onOpenPayments={() => setIsPaymentModalOpen(true)}
         />
 
         {/* Tab View Container */}
@@ -321,6 +348,9 @@ const AdminAppContent: React.FC = () => {
               {activeTab === 'courses' && (
                 <CoursesTab
                   courses={courses}
+                  masterQuestions={questions}
+                  customSubjects={customSubjects}
+                  onAddCustomSubject={handleAddCustomSubject}
                   onSaveCourse={handleSaveCourse}
                 />
               )}
@@ -328,6 +358,8 @@ const AdminAppContent: React.FC = () => {
               {activeTab === 'question_bank' && (
                 <QuestionBankTab
                   questions={questions}
+                  customSubjects={customSubjects}
+                  onAddCustomSubject={handleAddCustomSubject}
                   onSaveQuestion={handleSaveQuestion}
                   onDeleteQuestion={handleDeleteQuestion}
                 />
@@ -527,6 +559,13 @@ const AdminAppContent: React.FC = () => {
           </div>
         </div>
       )}
+      {/* PAYMENT TRANSACTION & VIP MODAL */}
+      <PaymentModal
+        isOpen={isPaymentModalOpen}
+        onClose={() => setIsPaymentModalOpen(false)}
+        users={users}
+        onToggleVip={handleToggleUserVip}
+      />
     </div>
   );
 };
