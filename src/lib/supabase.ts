@@ -10,25 +10,118 @@ import {
   INITIAL_RESOURCES 
 } from './initialData';
 
-const metaEnv = (import.meta as any).env || {};
-const supabaseUrl = metaEnv.VITE_SUPABASE_URL || '';
-const supabaseAnonKey = metaEnv.VITE_SUPABASE_ANON_KEY || '';
+let _supabaseClient: SupabaseClient | null = null;
+let _activeUrl = '';
+let _activeKey = '';
 
-export const isSupabaseConfigured = Boolean(
-  supabaseUrl && 
-  supabaseAnonKey && 
-  supabaseUrl !== 'https://your-supabase-project.supabase.co' &&
-  !supabaseUrl.includes('your-supabase-project')
-);
+export function getSupabase(): SupabaseClient | null {
+  const metaEnv = (import.meta as any).env || {};
+  let url = '';
+  let key = '';
 
-export const supabase: SupabaseClient | null = isSupabaseConfigured
-  ? createClient(supabaseUrl, supabaseAnonKey)
-  : null;
+  if (typeof window !== 'undefined') {
+    url = localStorage.getItem('tamreen_supabase_url') || metaEnv.VITE_SUPABASE_URL || '';
+    key = localStorage.getItem('tamreen_supabase_anon_key') || metaEnv.VITE_SUPABASE_ANON_KEY || '';
+  } else {
+    url = metaEnv.VITE_SUPABASE_URL || '';
+    key = metaEnv.VITE_SUPABASE_ANON_KEY || '';
+  }
+
+  url = url.trim().replace(/\/+$/, '');
+  key = key.trim();
+
+  if (!url || !key || url.includes('your-supabase-project')) {
+    _supabaseClient = null;
+    return null;
+  }
+
+  if (!_supabaseClient || _activeUrl !== url || _activeKey !== key) {
+    try {
+      _supabaseClient = createClient(url, key);
+      _activeUrl = url;
+      _activeKey = key;
+    } catch {
+      _supabaseClient = null;
+    }
+  }
+
+  return _supabaseClient;
+}
+
+export const isSupabaseConfigured = (): boolean => getSupabase() !== null;
+
+// Proxy property for backward compatibility
+export const supabase = new Proxy({} as SupabaseClient, {
+  get(_, prop) {
+    const client = getSupabase();
+    if (!client) return undefined;
+    const value = (client as any)[prop];
+    return typeof value === 'function' ? value.bind(client) : value;
+  }
+});
+
+export function saveCustomSupabaseConfig(url: string, key: string) {
+  const cleanUrl = url.trim().replace(/\/+$/, '');
+  const cleanKey = key.trim();
+  localStorage.setItem('tamreen_supabase_url', cleanUrl);
+  localStorage.setItem('tamreen_supabase_anon_key', cleanKey);
+  _supabaseClient = null;
+}
+
+export function clearCustomSupabaseConfig() {
+  localStorage.removeItem('tamreen_supabase_url');
+  localStorage.removeItem('tamreen_supabase_anon_key');
+  _supabaseClient = null;
+}
+
+export function getCustomSupabaseConfig(): { url: string; key: string; isCustom: boolean } {
+  const metaEnv = (import.meta as any).env || {};
+  const customUrl = typeof window !== 'undefined' ? localStorage.getItem('tamreen_supabase_url') || '' : '';
+  const customKey = typeof window !== 'undefined' ? localStorage.getItem('tamreen_supabase_anon_key') || '' : '';
+  const envUrl = metaEnv.VITE_SUPABASE_URL || '';
+  const envKey = metaEnv.VITE_SUPABASE_ANON_KEY || '';
+
+  if (customUrl && customKey) {
+    return { url: customUrl, key: customKey, isCustom: true };
+  }
+  return { url: envUrl, key: envKey, isCustom: false };
+}
+
+export async function testSupabaseConnection(urlInput?: string, keyInput?: string): Promise<{ success: boolean; error?: string }> {
+  let clientToTest: SupabaseClient | null = null;
+  if (urlInput && keyInput) {
+    try {
+      clientToTest = createClient(urlInput.trim().replace(/\/+$/, ''), keyInput.trim());
+    } catch (e: any) {
+      return { success: false, error: 'ভুল URL বা Key ফরম্যাট!' };
+    }
+  } else {
+    clientToTest = getSupabase();
+  }
+
+  if (!clientToTest) {
+    return { success: false, error: 'Supabase URL এবং Anon Key অনুপস্থিত।' };
+  }
+
+  try {
+    const res = await withTimeout(clientToTest.from('questions').select('id').limit(1), 4000);
+    if (res.error) {
+      if (res.error.code === '42P01') {
+        return { success: false, error: 'Supabase-এ সংযোগ সফল! কিন্তু `questions` টেবিলটি এখনো তৈরি হয়নি। নিচে থেকে SQL ডেসক্রিপশন স্ক্রিপ্ট রান করুন।' };
+      }
+      return { success: false, error: `Supabase ত্রুটি: ${res.error.message}` };
+    }
+    return { success: true };
+  } catch (err: any) {
+    return { success: false, error: 'নেটওয়ার্ক টাইমআউট বা ইন্টারনেটে সংযোগের সমস্যা। URL ও Key আবার চেক করুন।' };
+  }
+}
 
 export async function checkSupabaseConnection(): Promise<boolean> {
-  if (!supabase) return false;
+  const client = getSupabase();
+  if (!client) return false;
   try {
-    const res = await withTimeout(supabase.from('questions').select('id').limit(1), 2500);
+    const res = await withTimeout(client.from('questions').select('id').limit(1), 2500);
     return !res.error;
   } catch {
     return false;
@@ -36,7 +129,7 @@ export async function checkSupabaseConnection(): Promise<boolean> {
 }
 
 // LocalStorage Persistence Keys
-const STORAGE_KEYS = {
+export const STORAGE_KEYS = {
   QUESTIONS: 'tamreen_questions_v1',
   MODEL_TESTS: 'tamreen_model_tests_v1',
   COURSES: 'tamreen_courses_v1',
@@ -95,7 +188,7 @@ function initLocalStorage() {
 
 initLocalStorage();
 
-function getLocal<T>(key: string, fallback: T[]): T[] {
+export function getLocal<T>(key: string, fallback: T[]): T[] {
   try {
     const raw = localStorage.getItem(key);
     return raw ? JSON.parse(raw) : fallback;
@@ -490,15 +583,21 @@ export async function deleteGlossaryTerm(id: string): Promise<boolean> {
 }
 
 export async function getLectureSheets(): Promise<LectureSheet[]> {
+  const localList = getLocal<LectureSheet>(STORAGE_KEYS.RESOURCES, INITIAL_RESOURCES);
   if (supabase) {
     try {
       const res = await withTimeout(supabase.from('resources').select('*').order('created_at', { ascending: false }), 2500);
-      if (!res.error && res.data && res.data.length > 0) return res.data as LectureSheet[];
+      if (!res.error && res.data) {
+        const map = new Map<string, LectureSheet>();
+        (res.data as LectureSheet[]).forEach(item => map.set(item.id, item));
+        localList.forEach(item => map.set(item.id, item));
+        return Array.from(map.values()).sort((a, b) => new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime());
+      }
     } catch (err) {
       console.warn('Supabase resources fetch failed:', err);
     }
   }
-  return getLocal<LectureSheet>(STORAGE_KEYS.RESOURCES, INITIAL_RESOURCES);
+  return localList;
 }
 
 export async function saveLectureSheet(res: Omit<LectureSheet, 'id' | 'created_at'> & { id?: string }): Promise<LectureSheet> {

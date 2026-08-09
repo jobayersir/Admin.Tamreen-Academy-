@@ -132,25 +132,30 @@ export const TopBar: React.FC<TopBarProps> = ({
         )}
 
         {/* Supabase Connection Status Badge */}
-        <button
-          onClick={onOpenSupabaseModal}
-          className={`flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-xl border text-xs font-medium transition-all ${
-            isSupabaseConfigured
-              ? 'bg-emerald-950/60 text-emerald-300 border-emerald-700/80 hover:bg-emerald-900/80'
-              : 'bg-amber-950/60 text-amber-300 border-amber-700/80 hover:bg-amber-900/80'
-          }`}
-          title="Supabase Database Status"
-        >
-          <Database className="w-3.5 h-3.5" />
-          <span className="hidden sm:inline">
-            {isSupabaseConfigured ? 'Supabase Live' : 'Local Storage'}
-          </span>
-          {isSupabaseConfigured ? (
-            <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-          ) : (
-            <span className="w-2 h-2 rounded-full bg-amber-400" />
-          )}
-        </button>
+        {(() => {
+          const isDbActive = typeof isSupabaseConfigured === 'function' ? isSupabaseConfigured() : Boolean(isSupabaseConfigured);
+          return (
+            <button
+              onClick={onOpenSupabaseModal}
+              className={`flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-xl border text-xs font-medium transition-all ${
+                isDbActive
+                  ? 'bg-emerald-950/60 text-emerald-300 border-emerald-700/80 hover:bg-emerald-900/80'
+                  : 'bg-amber-950/60 text-amber-300 border-amber-700/80 hover:bg-amber-900/80'
+              }`}
+              title="Supabase Database Status"
+            >
+              <Database className="w-3.5 h-3.5" />
+              <span className="hidden sm:inline">
+                {isDbActive ? 'Supabase Live' : 'Local Storage'}
+              </span>
+              {isDbActive ? (
+                <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+              ) : (
+                <span className="w-2 h-2 rounded-full bg-amber-400" />
+              )}
+            </button>
+          );
+        })()}
 
         {/* Theme Toggle Button */}
         <button

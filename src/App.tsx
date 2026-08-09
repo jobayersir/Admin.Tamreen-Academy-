@@ -36,8 +36,19 @@ import {
   saveLectureSheet,
   deleteLectureSheet,
   getUsers,
-  toggleUserVip
+  toggleUserVip,
+  getLocal,
+  STORAGE_KEYS
 } from './lib/supabase';
+import {
+  INITIAL_QUESTIONS,
+  INITIAL_MODEL_TESTS,
+  INITIAL_COURSES,
+  INITIAL_WRITTEN_QUESTIONS,
+  INITIAL_GLOSSARY,
+  INITIAL_RESOURCES,
+  INITIAL_USERS
+} from './lib/initialData';
 
 import {
   Question,
@@ -88,15 +99,15 @@ const AdminAppContent: React.FC = () => {
     showToast('Subject Added', `"${newSubject}" নতুন বিষয় হিসেবে যুক্ত হয়েছে।`, 'success');
   };
 
-  // Data Collections State
-  const [questions, setQuestions] = useState<Question[]>([]);
-  const [modelTests, setModelTests] = useState<ModelTest[]>([]);
-  const [courses, setCourses] = useState<Course[]>([]);
-  const [writtenQuestions, setWrittenQuestions] = useState<WrittenQuestion[]>([]);
-  const [glossaryTerms, setGlossaryTerms] = useState<GlossaryTerm[]>([]);
-  const [lectureSheets, setLectureSheets] = useState<LectureSheet[]>([]);
-  const [users, setUsers] = useState<UserProfile[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
+  // Data Collections State (Instant Local-First Initialization for zero mobile data loading lag)
+  const [questions, setQuestions] = useState<Question[]>(() => getLocal<Question>(STORAGE_KEYS.QUESTIONS, INITIAL_QUESTIONS));
+  const [modelTests, setModelTests] = useState<ModelTest[]>(() => getLocal<ModelTest>(STORAGE_KEYS.MODEL_TESTS, INITIAL_MODEL_TESTS));
+  const [courses, setCourses] = useState<Course[]>(() => getLocal<Course>(STORAGE_KEYS.COURSES, INITIAL_COURSES));
+  const [writtenQuestions, setWrittenQuestions] = useState<WrittenQuestion[]>(() => getLocal<WrittenQuestion>(STORAGE_KEYS.WRITTEN, INITIAL_WRITTEN_QUESTIONS));
+  const [glossaryTerms, setGlossaryTerms] = useState<GlossaryTerm[]>(() => getLocal<GlossaryTerm>(STORAGE_KEYS.GLOSSARY, INITIAL_GLOSSARY));
+  const [lectureSheets, setLectureSheets] = useState<LectureSheet[]>(() => getLocal<LectureSheet>(STORAGE_KEYS.RESOURCES, INITIAL_RESOURCES));
+  const [users, setUsers] = useState<UserProfile[]>(() => getLocal<UserProfile>(STORAGE_KEYS.USERS, INITIAL_USERS));
+  const [isLoading, setIsLoading] = useState(false);
 
   // Quick MCQ Modal State (for TopBar or Dashboard trigger)
   const [isQuickMcqOpen, setIsQuickMcqOpen] = useState(false);
@@ -114,32 +125,34 @@ const AdminAppContent: React.FC = () => {
     difficulty: 'মাঝারি' as Difficulty
   });
 
-  // Load Initial Data & Sync
+  // Load Initial Data & Background Sync
   const loadAllData = async () => {
-    setIsLoading(true);
     try {
-      const dbStatus = await checkSupabaseConnection();
-      setIsSupabaseConnected(dbStatus);
+      // Check Supabase connection in parallel non-blocking
+      checkSupabaseConnection()
+        .then((dbStatus) => setIsSupabaseConnected(dbStatus))
+        .catch(() => setIsSupabaseConnected(false));
 
+      // Fetch all collections in parallel with fallbacks
       const [q, m, c, w, g, l, u] = await Promise.all([
-        getQuestions(),
-        getModelTests(),
-        getCourses(),
-        getWrittenQuestions(),
-        getGlossaryTerms(),
-        getLectureSheets(),
-        getUsers()
+        getQuestions().catch(() => getLocal<Question>(STORAGE_KEYS.QUESTIONS, INITIAL_QUESTIONS)),
+        getModelTests().catch(() => getLocal<ModelTest>(STORAGE_KEYS.MODEL_TESTS, INITIAL_MODEL_TESTS)),
+        getCourses().catch(() => getLocal<Course>(STORAGE_KEYS.COURSES, INITIAL_COURSES)),
+        getWrittenQuestions().catch(() => getLocal<WrittenQuestion>(STORAGE_KEYS.WRITTEN, INITIAL_WRITTEN_QUESTIONS)),
+        getGlossaryTerms().catch(() => getLocal<GlossaryTerm>(STORAGE_KEYS.GLOSSARY, INITIAL_GLOSSARY)),
+        getLectureSheets().catch(() => getLocal<LectureSheet>(STORAGE_KEYS.RESOURCES, INITIAL_RESOURCES)),
+        getUsers().catch(() => getLocal<UserProfile>(STORAGE_KEYS.USERS, INITIAL_USERS))
       ]);
 
-      setQuestions(q);
-      setModelTests(m);
-      setCourses(c);
-      setWrittenQuestions(w);
-      setGlossaryTerms(g);
-      setLectureSheets(l);
-      setUsers(u);
+      if (q && q.length > 0) setQuestions(q);
+      if (m && m.length > 0) setModelTests(m);
+      if (c && c.length > 0) setCourses(c);
+      if (w && w.length > 0) setWrittenQuestions(w);
+      if (g && g.length > 0) setGlossaryTerms(g);
+      if (l && l.length > 0) setLectureSheets(l);
+      if (u && u.length > 0) setUsers(u);
     } catch (err: any) {
-      console.error('Error loading data:', err);
+      console.warn('Background sync failed, using offline cache:', err);
     } finally {
       setIsLoading(false);
     }
