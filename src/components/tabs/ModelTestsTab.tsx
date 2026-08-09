@@ -47,6 +47,39 @@ export const ModelTestsTab: React.FC<Props> = ({
   // Preview Modal
   const [previewTest, setPreviewTest] = useState<ModelTest | null>(null);
 
+  // Live Exam Runner Modal State
+  const [activeExam, setActiveExam] = useState<ModelTest | null>(null);
+  const [userAnswers, setUserAnswers] = useState<Record<string, number>>({});
+  const [examSubmitted, setExamSubmitted] = useState(false);
+  const [examTimeLeft, setExamTimeLeft] = useState(0);
+
+  // Question selection filter inside create modal
+  const [modalQuestionSearch, setModalQuestionSearch] = useState('');
+  const [modalQuestionSubjectFilter, setModalQuestionSubjectFilter] = useState('All');
+
+  // Timer Effect for Live Exam
+  React.useEffect(() => {
+    if (!activeExam || examSubmitted || examTimeLeft <= 0) return;
+    const interval = setInterval(() => {
+      setExamTimeLeft((prev) => {
+        if (prev <= 1) {
+          clearInterval(interval);
+          setExamSubmitted(true);
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [activeExam, examSubmitted, examTimeLeft]);
+
+  const handleStartLiveExam = (test: ModelTest) => {
+    setActiveExam(test);
+    setUserAnswers({});
+    setExamSubmitted(false);
+    setExamTimeLeft((test.duration_minutes || 60) * 60);
+  };
+
   // Form State
   const [formData, setFormData] = useState({
     id: '',
@@ -344,14 +377,25 @@ export const ModelTestsTab: React.FC<Props> = ({
               </div>
 
               {/* Action Buttons */}
-              <div className="flex items-center justify-between pt-4 mt-4 border-t border-slate-800/80">
-                <button
-                  onClick={() => setPreviewTest(test)}
-                  className="text-xs text-slate-300 hover:text-emerald-400 flex items-center gap-1 font-medium transition-colors"
-                >
-                  <Eye className="w-3.5 h-3.5" />
-                  পূর্বরূপ (Preview)
-                </button>
+              <div className="flex items-center justify-between pt-4 mt-4 border-t border-slate-800/80 gap-2">
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => handleStartLiveExam(test)}
+                    className="text-xs px-2.5 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-semibold flex items-center gap-1 transition-all shadow-md active:scale-95"
+                    title="পরীক্ষার্থী মোডে সরাসরি পরীক্ষা দিন"
+                  >
+                    <Sparkles className="w-3.5 h-3.5" />
+                    <span>পরীক্ষা দিন</span>
+                  </button>
+
+                  <button
+                    onClick={() => setPreviewTest(test)}
+                    className="text-xs text-slate-300 hover:text-emerald-400 flex items-center gap-1 font-medium transition-colors px-2 py-1 rounded-lg hover:bg-slate-800"
+                  >
+                    <Eye className="w-3.5 h-3.5" />
+                    <span>পূর্বরূপ</span>
+                  </button>
+                </div>
 
                 <div className="flex items-center gap-1">
                   <button
@@ -671,6 +715,273 @@ export const ModelTestsTab: React.FC<Props> = ({
                   </div>
                 );
               })}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* LIVE STUDENT EXAM RUNNER MODAL */}
+      {activeExam && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-slate-950/90 backdrop-blur-md animate-in fade-in">
+          <div className="bg-slate-900 border border-slate-800 text-slate-100 rounded-2xl max-w-3xl w-full p-5 sm:p-6 shadow-2xl relative max-h-[92vh] flex flex-col justify-between">
+            {/* Top Bar / Header */}
+            <div className="flex items-center justify-between border-b border-slate-800 pb-4 mb-4 shrink-0">
+              <div>
+                <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-emerald-950 text-emerald-300 border border-emerald-800">
+                  {activeExam.subject} &bull; {activeExam.cadre_tier}
+                </span>
+                <h3 className="text-base sm:text-lg font-bold text-white font-serif mt-1">{activeExam.title}</h3>
+              </div>
+
+              <div className="flex items-center gap-3">
+                {!examSubmitted && (
+                  <div className="bg-slate-950 border border-slate-800 px-3 py-1.5 rounded-xl font-mono text-xs sm:text-sm font-bold text-amber-400 flex items-center gap-1.5 shadow-inner">
+                    <Clock className="w-4 h-4 text-amber-400 animate-pulse" />
+                    <span>
+                      {Math.floor(examTimeLeft / 60)}:
+                      {String(examTimeLeft % 60).padStart(2, '0')}
+                    </span>
+                  </div>
+                )}
+                <button
+                  onClick={() => setActiveExam(null)}
+                  className="text-slate-400 hover:text-white p-2 rounded-xl hover:bg-slate-800 transition-colors"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+            </div>
+
+            {/* Main Content Area */}
+            <div className="flex-1 overflow-y-auto space-y-4 pr-1 scrollbar-thin scrollbar-thumb-slate-800">
+              {/* Question List or Result Screen */}
+              {!examSubmitted ? (
+                <div className="space-y-4">
+                  {/* Progress Tracker */}
+                  <div className="bg-slate-950 p-3 rounded-xl border border-slate-800/80 flex items-center justify-between text-xs text-slate-300 font-mono">
+                    <span>
+                      উত্তর প্রদান করেছেন: <strong className="text-emerald-400">{Object.keys(userAnswers).length}</strong> / {activeExam.question_ids?.length || 0}
+                    </span>
+                    <span className="text-[11px] text-slate-400">
+                      নেগেটিভ মার্কিং: {activeExam.negative_marking ? 'সক্রিয় (-0.25)' : 'নিষ্ক্রিয়'}
+                    </span>
+                  </div>
+
+                  {activeExam.question_ids?.map((qId, qIdx) => {
+                    const q = questions.find((item) => item.id === qId);
+                    if (!q) return null;
+                    const selectedOpt = userAnswers[qId];
+
+                    return (
+                      <div key={qId} className="bg-slate-950 border border-slate-800/80 p-4 rounded-xl text-xs space-y-3">
+                        <div className="flex items-start justify-between gap-2">
+                          <span className="font-bold text-emerald-400 text-sm">
+                            প্রশ্ন {qIdx + 1}.
+                          </span>
+                          <span className="text-[10px] text-slate-400 font-mono">১ মার্ক</span>
+                        </div>
+
+                        <p className="font-medium text-slate-100 text-sm leading-relaxed">{q.question_bn}</p>
+                        {q.question_ar && (
+                          <p className="font-serif text-amber-300 text-right text-base leading-relaxed" dir="rtl">
+                            {q.question_ar}
+                          </p>
+                        )}
+
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1">
+                          {q.options.map((opt, oIdx) => {
+                            const isChosen = selectedOpt === oIdx;
+                            return (
+                              <button
+                                key={oIdx}
+                                type="button"
+                                onClick={() => setUserAnswers((prev) => ({ ...prev, [qId]: oIdx }))}
+                                className={`p-3 rounded-xl border text-left text-xs transition-all flex items-center gap-2 ${
+                                  isChosen
+                                    ? 'bg-emerald-950/80 border-emerald-500 text-emerald-200 font-semibold shadow-md ring-1 ring-emerald-500/50'
+                                    : 'bg-slate-900 border-slate-800 text-slate-300 hover:bg-slate-800/80'
+                                }`}
+                              >
+                                <span className={`w-5 h-5 rounded-full border flex items-center justify-center text-[10px] font-bold shrink-0 ${
+                                  isChosen ? 'bg-emerald-500 text-slate-950 border-emerald-400' : 'border-slate-700 text-slate-400'
+                                }`}>
+                                  {['ক', 'খ', 'গ', 'ঘ'][oIdx]}
+                                </span>
+                                <span>{opt}</span>
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : (
+                /* EXAM RESULT SCOREBOARD */
+                <div className="space-y-6 animate-in fade-in">
+                  {(() => {
+                    const totalQ = activeExam.question_ids?.length || 0;
+                    let correctCount = 0;
+                    let incorrectCount = 0;
+
+                    activeExam.question_ids?.forEach((qId) => {
+                      const q = questions.find((item) => item.id === qId);
+                      if (!q) return;
+                      const ans = userAnswers[qId];
+                      if (ans === undefined) return;
+                      if (ans === q.correct_option) correctCount++;
+                      else incorrectCount++;
+                    });
+
+                    const penalty = activeExam.negative_marking ? incorrectCount * 0.25 : 0;
+                    const markPerQ = totalQ > 0 ? activeExam.total_marks / totalQ : 1;
+                    const obtainedMarks = Math.max(0, correctCount * markPerQ - penalty);
+                    const isPassed = obtainedMarks >= activeExam.pass_mark;
+
+                    return (
+                      <div className="space-y-6">
+                        {/* Result Hero */}
+                        <div className={`p-6 rounded-2xl border text-center space-y-3 ${
+                          isPassed
+                            ? 'bg-emerald-950/50 border-emerald-700/80 text-emerald-100'
+                            : 'bg-rose-950/50 border-rose-800/80 text-rose-100'
+                        }`}>
+                          <div className="inline-flex p-3 rounded-full bg-slate-900 border border-slate-700 mb-1">
+                            {isPassed ? (
+                              <CheckCircle2 className="w-8 h-8 text-emerald-400" />
+                            ) : (
+                              <XCircle className="w-8 h-8 text-rose-400" />
+                            )}
+                          </div>
+                          <h4 className="text-2xl font-bold font-serif">
+                            {isPassed ? 'অভিনন্দন! আপনি পরীক্ষায় উত্তীর্ণ হয়েছেন!' : 'দুঃখিত! আরও অনুশিলনের প্রয়োজন।'}
+                          </h4>
+                          <p className="text-xs text-slate-300">
+                            পাস মার্কস: {activeExam.pass_mark} | মোট মার্কস: {activeExam.total_marks}
+                          </p>
+
+                          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 pt-4 border-t border-slate-800/60 font-mono text-xs">
+                            <div className="bg-slate-900/80 p-3 rounded-xl border border-slate-800">
+                              <span className="text-[10px] text-slate-400 block">প্রাপ্ত নম্বর</span>
+                              <strong className="text-base text-emerald-400">{obtainedMarks.toFixed(2)}</strong>
+                            </div>
+                            <div className="bg-slate-900/80 p-3 rounded-xl border border-slate-800">
+                              <span className="text-[10px] text-slate-400 block">সঠিক উত্তর</span>
+                              <strong className="text-base text-emerald-300">{correctCount}টি</strong>
+                            </div>
+                            <div className="bg-slate-900/80 p-3 rounded-xl border border-slate-800">
+                              <span className="text-[10px] text-slate-400 block">ভুল উত্তর (-0.25)</span>
+                              <strong className="text-base text-rose-400">{incorrectCount}টি</strong>
+                            </div>
+                            <div className="bg-slate-900/80 p-3 rounded-xl border border-slate-800">
+                              <span className="text-[10px] text-slate-400 block">অনুত্তরিত</span>
+                              <strong className="text-base text-slate-400">{totalQ - (correctCount + incorrectCount)}টি</strong>
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Detailed Solutions Review */}
+                        <div className="space-y-4">
+                          <h4 className="font-bold text-sm text-white font-serif border-b border-slate-800 pb-2">
+                            প্রশ্নের সঠিক উত্তর ও উত্তর বিশ্লেষণ:
+                          </h4>
+
+                          {activeExam.question_ids?.map((qId, idx) => {
+                            const q = questions.find((item) => item.id === qId);
+                            if (!q) return null;
+                            const userAns = userAnswers[qId];
+                            const isCorrect = userAns === q.correct_option;
+
+                            return (
+                              <div
+                                key={qId}
+                                className={`p-4 rounded-xl border text-xs space-y-2 ${
+                                  userAns === undefined
+                                    ? 'bg-slate-950 border-slate-800'
+                                    : isCorrect
+                                    ? 'bg-emerald-950/30 border-emerald-800/60'
+                                    : 'bg-rose-950/30 border-rose-900/60'
+                                }`}
+                              >
+                                <div className="flex items-center justify-between">
+                                  <span className="font-bold text-slate-200">প্রশ্ন {idx + 1}. {q.question_bn}</span>
+                                  {userAns !== undefined && (
+                                    <span className={`text-[10px] px-2 py-0.5 rounded font-mono font-bold ${
+                                      isCorrect ? 'bg-emerald-900 text-emerald-300' : 'bg-rose-900 text-rose-300'
+                                    }`}>
+                                      {isCorrect ? 'সঠিক (+১)' : 'ভুল (-০.২৫)'}
+                                    </span>
+                                  )}
+                                </div>
+
+                                <div className="grid grid-cols-2 gap-2 pt-2">
+                                  {q.options.map((opt, oIdx) => {
+                                    const isTargetCorrect = oIdx === q.correct_option;
+                                    const isUserPick = oIdx === userAns;
+
+                                    return (
+                                      <div
+                                        key={oIdx}
+                                        className={`p-2 rounded-lg border text-xs flex items-center justify-between ${
+                                          isTargetCorrect
+                                            ? 'bg-emerald-900/60 border-emerald-600 text-emerald-200 font-semibold'
+                                            : isUserPick
+                                            ? 'bg-rose-900/60 border-rose-600 text-rose-200 font-semibold'
+                                            : 'bg-slate-900 border-slate-800 text-slate-400'
+                                        }`}
+                                      >
+                                        <span><strong className="mr-1">{['ক', 'খ', 'গ', 'ঘ'][oIdx]}.</strong> {opt}</span>
+                                        {isTargetCorrect && <Check className="w-3.5 h-3.5 text-emerald-400" />}
+                                      </div>
+                                    );
+                                  })}
+                                </div>
+
+                                {q.explanation && (
+                                  <div className="p-2.5 bg-slate-900/90 rounded-lg text-[11px] text-slate-300 border border-slate-800/80 mt-2">
+                                    <strong className="text-emerald-400">ব্যাখ্যা: </strong>{q.explanation}
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    );
+                  })()}
+                </div>
+              )}
+            </div>
+
+            {/* Bottom Modal Actions */}
+            <div className="pt-4 mt-4 border-t border-slate-800 flex items-center justify-between shrink-0">
+              <button
+                type="button"
+                onClick={() => setActiveExam(null)}
+                className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-medium"
+              >
+                বন্ধ করুন
+              </button>
+
+              {!examSubmitted ? (
+                <button
+                  type="button"
+                  onClick={() => setExamSubmitted(true)}
+                  className="px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-semibold text-xs shadow-lg shadow-emerald-950/80 flex items-center gap-1.5 active:scale-95 transition-all"
+                >
+                  <CheckCircle2 className="w-4 h-4" />
+                  <span>পরীক্ষা জমা দিন (Submit Exam)</span>
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => handleStartLiveExam(activeExam)}
+                  className="px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-semibold text-xs shadow-lg flex items-center gap-1.5 active:scale-95 transition-all"
+                >
+                  <Sparkles className="w-4 h-4" />
+                  <span>পুনরায় চেষ্টা করুন</span>
+                </button>
+              )}
             </div>
           </div>
         </div>

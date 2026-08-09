@@ -115,17 +115,21 @@ function setLocal<T>(key: string, value: T[]) {
 
 // ==================== QUESTIONS API ====================
 export async function getQuestions(): Promise<Question[]> {
+  const localList = getLocal<Question>(STORAGE_KEYS.QUESTIONS, INITIAL_QUESTIONS);
   if (supabase) {
     try {
       const res = await withTimeout(supabase.from('questions').select('*').order('created_at', { ascending: false }), 2500);
-      if (!res.error && res.data && res.data.length > 0) {
-        return res.data as Question[];
+      if (!res.error && res.data) {
+        const map = new Map<string, Question>();
+        (res.data as Question[]).forEach(item => map.set(item.id, item));
+        localList.forEach(item => map.set(item.id, item));
+        return Array.from(map.values()).sort((a, b) => new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime());
       }
     } catch (err) {
       console.warn('Supabase fetch failed, falling back to local persistence:', err);
     }
   }
-  return getLocal<Question>(STORAGE_KEYS.QUESTIONS, INITIAL_QUESTIONS);
+  return localList;
 }
 
 export async function saveQuestion(q: Omit<Question, 'id' | 'created_at'> & { id?: string }): Promise<Question> {
@@ -136,18 +140,6 @@ export async function saveQuestion(q: Omit<Question, 'id' | 'created_at'> & { id
     created_at: new Date().toISOString()
   } as Question;
 
-  if (supabase) {
-    try {
-      if (isEdit) {
-        await supabase.from('questions').update(newQuestion).eq('id', newQuestion.id);
-      } else {
-        await supabase.from('questions').insert([newQuestion]);
-      }
-    } catch (err) {
-      console.warn('Supabase insert failed, using local storage:', err);
-    }
-  }
-
   const list = getLocal<Question>(STORAGE_KEYS.QUESTIONS, INITIAL_QUESTIONS);
   if (isEdit) {
     const idx = list.findIndex(item => item.id === newQuestion.id);
@@ -157,6 +149,21 @@ export async function saveQuestion(q: Omit<Question, 'id' | 'created_at'> & { id
     list.unshift(newQuestion);
   }
   setLocal(STORAGE_KEYS.QUESTIONS, list);
+
+  if (supabase) {
+    try {
+      if (isEdit) {
+        const { error } = await supabase.from('questions').update(newQuestion).eq('id', newQuestion.id);
+        if (error) console.warn('Supabase questions update error:', error.message);
+      } else {
+        const { error } = await supabase.from('questions').insert([newQuestion]);
+        if (error) console.warn('Supabase questions insert error:', error.message);
+      }
+    } catch (err) {
+      console.warn('Supabase insert failed:', err);
+    }
+  }
+
   return newQuestion;
 }
 
@@ -167,47 +174,57 @@ export async function bulkSaveQuestions(qs: Omit<Question, 'id' | 'created_at'>[
     created_at: new Date().toISOString()
   }));
 
-  if (supabase) {
-    try {
-      const { data, error } = await supabase.from('questions').insert(newQuestions).select();
-      if (!error && data && data.length > 0) return data as Question[];
-    } catch (err) {
-      console.warn('Supabase bulk insert failed, using local storage:', err);
-    }
-  }
-
   const list = getLocal<Question>(STORAGE_KEYS.QUESTIONS, INITIAL_QUESTIONS);
   const updated = [...newQuestions, ...list];
   setLocal(STORAGE_KEYS.QUESTIONS, updated);
+
+  if (supabase) {
+    try {
+      const { data, error } = await supabase.from('questions').insert(newQuestions).select();
+      if (error) console.warn('Supabase bulk save questions error:', error.message);
+      if (!error && data && data.length > 0) return data as Question[];
+    } catch (err) {
+      console.warn('Supabase bulk insert failed:', err);
+    }
+  }
+
   return newQuestions;
 }
 
 export async function deleteQuestion(id: string): Promise<boolean> {
+  const list = getLocal<Question>(STORAGE_KEYS.QUESTIONS, INITIAL_QUESTIONS);
+  const filtered = list.filter(q => q.id !== id);
+  setLocal(STORAGE_KEYS.QUESTIONS, filtered);
+
   if (supabase) {
     try {
-      await supabase.from('questions').delete().eq('id', id);
+      const { error } = await supabase.from('questions').delete().eq('id', id);
+      if (error) console.warn('Supabase question delete error:', error.message);
     } catch (err) {
       console.warn('Supabase delete failed:', err);
     }
   }
 
-  const list = getLocal<Question>(STORAGE_KEYS.QUESTIONS, INITIAL_QUESTIONS);
-  const filtered = list.filter(q => q.id !== id);
-  setLocal(STORAGE_KEYS.QUESTIONS, filtered);
   return true;
 }
 
 // ==================== MODEL TESTS API ====================
 export async function getModelTests(): Promise<ModelTest[]> {
+  const localList = getLocal<ModelTest>(STORAGE_KEYS.MODEL_TESTS, INITIAL_MODEL_TESTS);
   if (supabase) {
     try {
       const res = await withTimeout(supabase.from('model_tests').select('*').order('created_at', { ascending: false }), 2500);
-      if (!res.error && res.data && res.data.length > 0) return res.data as ModelTest[];
+      if (!res.error && res.data) {
+        const map = new Map<string, ModelTest>();
+        (res.data as ModelTest[]).forEach(item => map.set(item.id, item));
+        localList.forEach(item => map.set(item.id, item));
+        return Array.from(map.values()).sort((a, b) => new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime());
+      }
     } catch (err) {
       console.warn('Supabase model tests fetch failed:', err);
     }
   }
-  return getLocal<ModelTest>(STORAGE_KEYS.MODEL_TESTS, INITIAL_MODEL_TESTS);
+  return localList;
 }
 
 export async function saveModelTest(test: Omit<ModelTest, 'id' | 'created_at'> & { id?: string }): Promise<ModelTest> {
@@ -218,18 +235,6 @@ export async function saveModelTest(test: Omit<ModelTest, 'id' | 'created_at'> &
     created_at: new Date().toISOString()
   } as ModelTest;
 
-  if (supabase) {
-    try {
-      if (isEdit) {
-        await supabase.from('model_tests').update(modelTest).eq('id', modelTest.id);
-      } else {
-        await supabase.from('model_tests').insert([modelTest]);
-      }
-    } catch (err) {
-      console.warn('Supabase model test save failed:', err);
-    }
-  }
-
   const list = getLocal<ModelTest>(STORAGE_KEYS.MODEL_TESTS, INITIAL_MODEL_TESTS);
   if (isEdit) {
     const idx = list.findIndex(m => m.id === modelTest.id);
@@ -239,33 +244,57 @@ export async function saveModelTest(test: Omit<ModelTest, 'id' | 'created_at'> &
     list.unshift(modelTest);
   }
   setLocal(STORAGE_KEYS.MODEL_TESTS, list);
+
+  if (supabase) {
+    try {
+      if (isEdit) {
+        const { error } = await supabase.from('model_tests').update(modelTest).eq('id', modelTest.id);
+        if (error) console.warn('Supabase model_tests update error:', error.message);
+      } else {
+        const { error } = await supabase.from('model_tests').insert([modelTest]);
+        if (error) console.warn('Supabase model_tests insert error:', error.message);
+      }
+    } catch (err) {
+      console.warn('Supabase model test save failed:', err);
+    }
+  }
+
   return modelTest;
 }
 
 export async function deleteModelTest(id: string): Promise<boolean> {
+  const list = getLocal<ModelTest>(STORAGE_KEYS.MODEL_TESTS, INITIAL_MODEL_TESTS);
+  setLocal(STORAGE_KEYS.MODEL_TESTS, list.filter(m => m.id !== id));
+
   if (supabase) {
     try {
-      await supabase.from('model_tests').delete().eq('id', id);
+      const { error } = await supabase.from('model_tests').delete().eq('id', id);
+      if (error) console.warn('Supabase delete model test error:', error.message);
     } catch (err) {
       console.warn('Supabase delete model test failed:', err);
     }
   }
-  const list = getLocal<ModelTest>(STORAGE_KEYS.MODEL_TESTS, INITIAL_MODEL_TESTS);
-  setLocal(STORAGE_KEYS.MODEL_TESTS, list.filter(m => m.id !== id));
+
   return true;
 }
 
 // ==================== COURSES API ====================
 export async function getCourses(): Promise<Course[]> {
+  const localList = getLocal<Course>(STORAGE_KEYS.COURSES, INITIAL_COURSES);
   if (supabase) {
     try {
       const res = await withTimeout(supabase.from('courses').select('*').order('created_at', { ascending: false }), 2500);
-      if (!res.error && res.data && res.data.length > 0) return res.data as Course[];
+      if (!res.error && res.data) {
+        const map = new Map<string, Course>();
+        (res.data as Course[]).forEach(item => map.set(item.id, item));
+        localList.forEach(item => map.set(item.id, item));
+        return Array.from(map.values()).sort((a, b) => new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime());
+      }
     } catch (err) {
       console.warn('Supabase courses fetch failed:', err);
     }
   }
-  return getLocal<Course>(STORAGE_KEYS.COURSES, INITIAL_COURSES);
+  return localList;
 }
 
 export async function saveCourse(course: Omit<Course, 'id' | 'created_at'> & { id?: string }): Promise<Course> {
@@ -276,18 +305,6 @@ export async function saveCourse(course: Omit<Course, 'id' | 'created_at'> & { i
     created_at: new Date().toISOString()
   } as Course;
 
-  if (supabase) {
-    try {
-      if (isEdit) {
-        await supabase.from('courses').update(fullCourse).eq('id', fullCourse.id);
-      } else {
-        await supabase.from('courses').insert([fullCourse]);
-      }
-    } catch (err) {
-      console.warn('Supabase save course failed:', err);
-    }
-  }
-
   const list = getLocal<Course>(STORAGE_KEYS.COURSES, INITIAL_COURSES);
   if (isEdit) {
     const idx = list.findIndex(c => c.id === fullCourse.id);
@@ -297,56 +314,87 @@ export async function saveCourse(course: Omit<Course, 'id' | 'created_at'> & { i
     list.unshift(fullCourse);
   }
   setLocal(STORAGE_KEYS.COURSES, list);
+
+  if (supabase) {
+    try {
+      if (isEdit) {
+        const { error } = await supabase.from('courses').update(fullCourse).eq('id', fullCourse.id);
+        if (error) console.warn('Supabase courses update error:', error.message);
+      } else {
+        const { error } = await supabase.from('courses').insert([fullCourse]);
+        if (error) console.warn('Supabase courses insert error:', error.message);
+      }
+    } catch (err) {
+      console.warn('Supabase save course failed:', err);
+    }
+  }
+
   return fullCourse;
 }
 
 // ==================== USERS & SUBSCRIPTIONS API ====================
 export async function getUsers(): Promise<UserProfile[]> {
+  const localList = getLocal<UserProfile>(STORAGE_KEYS.USERS, INITIAL_USERS);
   if (supabase) {
     try {
       const res = await withTimeout(supabase.from('users_profile').select('*').order('created_at', { ascending: false }), 2500);
-      if (!res.error && res.data && res.data.length > 0) return res.data as UserProfile[];
+      if (!res.error && res.data) {
+        const map = new Map<string, UserProfile>();
+        (res.data as UserProfile[]).forEach(item => map.set(item.id, item));
+        localList.forEach(item => map.set(item.id, item));
+        return Array.from(map.values()).sort((a, b) => new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime());
+      }
     } catch (err) {
       console.warn('Supabase users fetch failed:', err);
     }
   }
-  return getLocal<UserProfile>(STORAGE_KEYS.USERS, INITIAL_USERS);
+  return localList;
 }
 
 export async function toggleUserVip(userId: string, currentVip: boolean): Promise<UserProfile> {
   const isVip = !currentVip;
   const expiresAt = isVip ? new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString() : undefined;
 
+  const list = getLocal<UserProfile>(STORAGE_KEYS.USERS, INITIAL_USERS);
+  const idx = list.findIndex(u => u.id === userId);
+  let updatedUser: UserProfile | null = null;
+  if (idx !== -1) {
+    list[idx].is_vip = isVip;
+    list[idx].subscription_expires_at = expiresAt;
+    setLocal(STORAGE_KEYS.USERS, list);
+    updatedUser = list[idx];
+  }
+
   if (supabase) {
     try {
-      await supabase.from('users_profile').update({ is_vip: isVip, subscription_expires_at: expiresAt }).eq('id', userId);
+      const { error } = await supabase.from('users_profile').update({ is_vip: isVip, subscription_expires_at: expiresAt }).eq('id', userId);
+      if (error) console.warn('Supabase toggle VIP error:', error.message);
     } catch (err) {
       console.warn('Supabase toggle VIP failed:', err);
     }
   }
 
-  const list = getLocal<UserProfile>(STORAGE_KEYS.USERS, INITIAL_USERS);
-  const idx = list.findIndex(u => u.id === userId);
-  if (idx !== -1) {
-    list[idx].is_vip = isVip;
-    list[idx].subscription_expires_at = expiresAt;
-    setLocal(STORAGE_KEYS.USERS, list);
-    return list[idx];
-  }
+  if (updatedUser) return updatedUser;
   throw new Error('User not found');
 }
 
 // ==================== WRITTEN QUESTIONS API ====================
 export async function getWrittenQuestions(): Promise<WrittenQuestion[]> {
+  const localList = getLocal<WrittenQuestion>(STORAGE_KEYS.WRITTEN, INITIAL_WRITTEN_QUESTIONS);
   if (supabase) {
     try {
       const res = await withTimeout(supabase.from('written_questions').select('*').order('created_at', { ascending: false }), 2500);
-      if (!res.error && res.data && res.data.length > 0) return res.data as WrittenQuestion[];
+      if (!res.error && res.data) {
+        const map = new Map<string, WrittenQuestion>();
+        (res.data as WrittenQuestion[]).forEach(item => map.set(item.id, item));
+        localList.forEach(item => map.set(item.id, item));
+        return Array.from(map.values()).sort((a, b) => new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime());
+      }
     } catch (err) {
       console.warn('Supabase written fetch failed:', err);
     }
   }
-  return getLocal<WrittenQuestion>(STORAGE_KEYS.WRITTEN, INITIAL_WRITTEN_QUESTIONS);
+  return localList;
 }
 
 export async function saveWrittenQuestion(wq: Omit<WrittenQuestion, 'id' | 'created_at'> & { id?: string }): Promise<WrittenQuestion> {
@@ -357,15 +405,6 @@ export async function saveWrittenQuestion(wq: Omit<WrittenQuestion, 'id' | 'crea
     created_at: new Date().toISOString()
   };
 
-  if (supabase) {
-    try {
-      if (isEdit) await supabase.from('written_questions').update(item).eq('id', item.id);
-      else await supabase.from('written_questions').insert([item]);
-    } catch (err) {
-      console.warn('Supabase save written failed:', err);
-    }
-  }
-
   const list = getLocal<WrittenQuestion>(STORAGE_KEYS.WRITTEN, INITIAL_WRITTEN_QUESTIONS);
   if (isEdit) {
     const idx = list.findIndex(w => w.id === item.id);
@@ -375,20 +414,36 @@ export async function saveWrittenQuestion(wq: Omit<WrittenQuestion, 'id' | 'crea
     list.unshift(item);
   }
   setLocal(STORAGE_KEYS.WRITTEN, list);
+
+  if (supabase) {
+    try {
+      if (isEdit) await supabase.from('written_questions').update(item).eq('id', item.id);
+      else await supabase.from('written_questions').insert([item]);
+    } catch (err) {
+      console.warn('Supabase save written failed:', err);
+    }
+  }
+
   return item;
 }
 
 // ==================== GLOSSARY & RESOURCES API ====================
 export async function getGlossaryTerms(): Promise<GlossaryTerm[]> {
+  const localList = getLocal<GlossaryTerm>(STORAGE_KEYS.GLOSSARY, INITIAL_GLOSSARY);
   if (supabase) {
     try {
       const res = await withTimeout(supabase.from('glossary').select('*').order('created_at', { ascending: false }), 2500);
-      if (!res.error && res.data && res.data.length > 0) return res.data as GlossaryTerm[];
+      if (!res.error && res.data) {
+        const map = new Map<string, GlossaryTerm>();
+        (res.data as GlossaryTerm[]).forEach(item => map.set(item.id, item));
+        localList.forEach(item => map.set(item.id, item));
+        return Array.from(map.values()).sort((a, b) => new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime());
+      }
     } catch (err) {
       console.warn('Supabase glossary fetch failed:', err);
     }
   }
-  return getLocal<GlossaryTerm>(STORAGE_KEYS.GLOSSARY, INITIAL_GLOSSARY);
+  return localList;
 }
 
 export async function saveGlossaryTerm(term: Omit<GlossaryTerm, 'id' | 'created_at'> & { id?: string }): Promise<GlossaryTerm> {
@@ -399,15 +454,6 @@ export async function saveGlossaryTerm(term: Omit<GlossaryTerm, 'id' | 'created_
     created_at: new Date().toISOString()
   };
 
-  if (supabase) {
-    try {
-      if (isEdit) await supabase.from('glossary').update(item).eq('id', item.id);
-      else await supabase.from('glossary').insert([item]);
-    } catch (err) {
-      console.warn('Supabase glossary save failed:', err);
-    }
-  }
-
   const list = getLocal<GlossaryTerm>(STORAGE_KEYS.GLOSSARY, INITIAL_GLOSSARY);
   if (isEdit) {
     const idx = list.findIndex(g => g.id === item.id);
@@ -417,6 +463,16 @@ export async function saveGlossaryTerm(term: Omit<GlossaryTerm, 'id' | 'created_
     list.unshift(item);
   }
   setLocal(STORAGE_KEYS.GLOSSARY, list);
+
+  if (supabase) {
+    try {
+      if (isEdit) await supabase.from('glossary').update(item).eq('id', item.id);
+      else await supabase.from('glossary').insert([item]);
+    } catch (err) {
+      console.warn('Supabase glossary save failed:', err);
+    }
+  }
+
   return item;
 }
 
