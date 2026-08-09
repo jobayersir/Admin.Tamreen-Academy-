@@ -184,6 +184,49 @@ export const AIGeneratorTab: React.FC<Props> = ({
     }
   };
 
+  // Preview item editor modal state
+  const [editingPreviewItem, setEditingPreviewItem] = useState<{ index: number; data: any; mode: 'mode2' | 'mode3' } | null>(null);
+
+  const handleEditPreviewItem = (index: number, data: any, mode: 'mode2' | 'mode3') => {
+    setEditingPreviewItem({
+      index,
+      data: {
+        ...data,
+        options: data.options && data.options.length === 4 ? [...data.options] : ['অপশন ১', 'অপশন ২', 'অপশন ৩', 'অপশন ৪']
+      },
+      mode
+    });
+  };
+
+  const handleSavePreviewItemEdit = () => {
+    if (!editingPreviewItem) return;
+    const { index, data, mode } = editingPreviewItem;
+    if (mode === 'mode2') {
+      setParsedPreviewList((prev) => {
+        const updated = [...prev];
+        updated[index] = data;
+        return updated;
+      });
+    } else {
+      setGeneratedList((prev) => {
+        const updated = [...prev];
+        updated[index] = data;
+        return updated;
+      });
+    }
+    setEditingPreviewItem(null);
+    showToast('Updated', 'প্রিভিউ প্রশ্নটি সফলভাবে আপডেট করা হয়েছে।', 'success');
+  };
+
+  const handleDeletePreviewItem = (index: number, mode: 'mode2' | 'mode3') => {
+    if (mode === 'mode2') {
+      setParsedPreviewList((prev) => prev.filter((_, i) => i !== index));
+    } else {
+      setGeneratedList((prev) => prev.filter((_, i) => i !== index));
+    }
+    showToast('Removed', 'প্রশ্নটি প্রিভিউ তালিকা থেকে মুছে ফেলা হয়েছে।', 'info');
+  };
+
   // Bulk Save Handler
   const handleBulkSave = async (items: any[], subject: Subject, cadre: CadreTier) => {
     if (items.length === 0) return;
@@ -392,9 +435,27 @@ export const AIGeneratorTab: React.FC<Props> = ({
               <div className="space-y-3">
                 {generatedList.map((item, idx) => (
                   <div key={idx} className="bg-slate-950 border border-slate-800 p-4 rounded-xl text-xs space-y-2">
-                    <div className="flex items-start justify-between gap-2">
-                      <span className="font-bold text-amber-400">প্রশ্ন {idx + 1}.</span>
-                      <span className="text-[10px] text-slate-400 font-mono">{genSubject}</span>
+                    <div className="flex items-center justify-between gap-2 border-b border-slate-800 pb-2">
+                      <div className="flex items-center gap-2">
+                        <span className="font-bold text-amber-400 font-mono">প্রশ্ন {idx + 1}.</span>
+                        <span className="text-[10px] text-slate-400 font-mono">{genSubject}</span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <button
+                          onClick={() => handleEditPreviewItem(idx, item, 'mode3')}
+                          className="flex items-center gap-1 px-2.5 py-1 rounded bg-slate-800 hover:bg-slate-700 text-amber-300 text-[11px] font-medium transition-colors"
+                        >
+                          <Edit2 className="w-3 h-3" />
+                          <span>এডিট</span>
+                        </button>
+                        <button
+                          onClick={() => handleDeletePreviewItem(idx, 'mode3')}
+                          className="p-1 rounded text-slate-500 hover:text-rose-400 hover:bg-rose-950/40 transition-colors"
+                          title="মুছে ফেলুন"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
                     </div>
 
                     <p className="font-medium text-slate-100">{item.question_bn}</p>
@@ -521,9 +582,27 @@ export const AIGeneratorTab: React.FC<Props> = ({
               <div className="space-y-3">
                 {parsedPreviewList.map((item, idx) => (
                   <div key={idx} className="bg-slate-950 border border-slate-800 p-4 rounded-xl text-xs space-y-2">
-                    <div className="flex items-start justify-between gap-2">
-                      <span className="font-bold text-teal-400">প্রশ্ন {idx + 1}.</span>
-                      <span className="text-[10px] text-slate-400 font-mono">{parseSubject}</span>
+                    <div className="flex items-center justify-between gap-2 border-b border-slate-800 pb-2">
+                      <div className="flex items-center gap-2">
+                        <span className="font-bold text-teal-400 font-mono">প্রশ্ন {idx + 1}.</span>
+                        <span className="text-[10px] text-slate-400 font-mono">{parseSubject}</span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <button
+                          onClick={() => handleEditPreviewItem(idx, item, 'mode2')}
+                          className="flex items-center gap-1 px-2.5 py-1 rounded bg-slate-800 hover:bg-slate-700 text-teal-300 text-[11px] font-medium transition-colors"
+                        >
+                          <Edit2 className="w-3 h-3" />
+                          <span>এডিট</span>
+                        </button>
+                        <button
+                          onClick={() => handleDeletePreviewItem(idx, 'mode2')}
+                          className="p-1 rounded text-slate-500 hover:text-rose-400 hover:bg-rose-950/40 transition-colors"
+                          title="মুছে ফেলুন"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
                     </div>
 
                     <p className="font-medium text-slate-100">{item.question_bn}</p>
@@ -693,6 +772,125 @@ export const AIGeneratorTab: React.FC<Props> = ({
             প্রশ্ন ডাটাবেজে সংরক্ষণ করুন
           </button>
         </form>
+      )}
+
+      {/* EDIT PREVIEW ITEM MODAL */}
+      {editingPreviewItem && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm animate-in fade-in">
+          <div className="bg-slate-900 border border-slate-800 text-slate-100 rounded-2xl max-w-xl w-full p-6 shadow-2xl relative space-y-4 max-h-[90vh] overflow-y-auto">
+            <h3 className="text-base font-bold text-white font-serif flex items-center gap-2">
+              <Edit2 className="w-5 h-5 text-amber-400" />
+              প্রিভিউ প্রশ্ন এডিট করুন (#{editingPreviewItem.index + 1})
+            </h3>
+
+            <div className="space-y-3 text-xs">
+              <div>
+                <label className="block text-slate-300 font-medium mb-1">প্রশ্ন বাংলা টেক্সট *</label>
+                <textarea
+                  rows={2}
+                  value={editingPreviewItem.data.question_bn || ''}
+                  onChange={(e) =>
+                    setEditingPreviewItem({
+                      ...editingPreviewItem,
+                      data: { ...editingPreviewItem.data, question_bn: e.target.value }
+                    })
+                  }
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl p-2.5 text-slate-100 focus:border-amber-500 focus:outline-none"
+                />
+              </div>
+
+              <div>
+                <label className="block text-slate-300 font-medium mb-1">প্রশ্ন আরবি টেক্সট (যদি থাকে)</label>
+                <input
+                  type="text"
+                  value={editingPreviewItem.data.question_ar || ''}
+                  onChange={(e) =>
+                    setEditingPreviewItem({
+                      ...editingPreviewItem,
+                      data: { ...editingPreviewItem.data, question_ar: e.target.value }
+                    })
+                  }
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl p-2.5 text-amber-300 font-serif focus:border-amber-500 focus:outline-none text-right"
+                  dir="rtl"
+                />
+              </div>
+
+              <div className="space-y-2">
+                <label className="block text-slate-300 font-medium">৪টি অপশন ও সঠিক উত্তর *</label>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  {[0, 1, 2, 3].map((oIdx) => (
+                    <div
+                      key={oIdx}
+                      className={`p-2 rounded-xl border flex items-center gap-2 ${
+                        editingPreviewItem.data.correct_option === oIdx
+                          ? 'bg-emerald-950/60 border-emerald-600'
+                          : 'bg-slate-950 border-slate-800'
+                      }`}
+                    >
+                      <input
+                        type="radio"
+                        name="preview_item_correct"
+                        checked={editingPreviewItem.data.correct_option === oIdx}
+                        onChange={() =>
+                          setEditingPreviewItem({
+                            ...editingPreviewItem,
+                            data: { ...editingPreviewItem.data, correct_option: oIdx }
+                          })
+                        }
+                      />
+                      <span className="font-bold text-slate-400">{['ক', 'খ', 'গ', 'ঘ'][oIdx]}.</span>
+                      <input
+                        type="text"
+                        value={editingPreviewItem.data.options?.[oIdx] || ''}
+                        onChange={(e) => {
+                          const newOpts = [...(editingPreviewItem.data.options || [])];
+                          newOpts[oIdx] = e.target.value;
+                          setEditingPreviewItem({
+                            ...editingPreviewItem,
+                            data: { ...editingPreviewItem.data, options: newOpts }
+                          });
+                        }}
+                        className="w-full bg-transparent text-slate-100 text-xs focus:outline-none"
+                      />
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-slate-300 font-medium mb-1">ব্যাখ্যা &amp; রেফারেন্স</label>
+                <textarea
+                  rows={2}
+                  value={editingPreviewItem.data.explanation || ''}
+                  onChange={(e) =>
+                    setEditingPreviewItem({
+                      ...editingPreviewItem,
+                      data: { ...editingPreviewItem.data, explanation: e.target.value }
+                    })
+                  }
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl p-2.5 text-slate-100 focus:border-amber-500 focus:outline-none"
+                />
+              </div>
+
+              <div className="flex items-center justify-end gap-3 pt-3 border-t border-slate-800">
+                <button
+                  type="button"
+                  onClick={() => setEditingPreviewItem(null)}
+                  className="px-4 py-2 rounded-xl bg-slate-800 text-slate-300 font-medium"
+                >
+                  বাতিল
+                </button>
+                <button
+                  type="button"
+                  onClick={handleSavePreviewItemEdit}
+                  className="px-5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-semibold shadow-md"
+                >
+                  আপডেট আপডেট করুন
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

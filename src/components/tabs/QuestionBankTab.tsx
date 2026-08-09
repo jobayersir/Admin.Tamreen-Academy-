@@ -25,6 +25,7 @@ interface Props {
   onAddCustomSubject: (subject: string) => void;
   onSaveQuestion: (q: Omit<Question, 'id' | 'created_at'> & { id?: string }) => Promise<void>;
   onDeleteQuestion: (id: string) => Promise<void>;
+  onSwitchTab?: (tab: string) => void;
 }
 
 export const QuestionBankTab: React.FC<Props> = ({
@@ -32,7 +33,8 @@ export const QuestionBankTab: React.FC<Props> = ({
   customSubjects = [],
   onAddCustomSubject,
   onSaveQuestion,
-  onDeleteQuestion
+  onDeleteQuestion,
+  onSwitchTab
 }) => {
   const { showToast } = useToast();
   const [search, setSearch] = useState('');
@@ -215,13 +217,25 @@ export const QuestionBankTab: React.FC<Props> = ({
           </p>
         </div>
 
-        <button
-          onClick={handleOpenCreate}
-          className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-semibold text-xs transition-all shadow-md active:scale-95 shrink-0"
-        >
-          <Plus className="w-4 h-4" />
-          <span>ম্যানুয়ালি নতুন MCQ যোগ</span>
-        </button>
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            onClick={handleOpenCreate}
+            className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-semibold text-xs transition-all shadow-md active:scale-95 shrink-0"
+          >
+            <Plus className="w-4 h-4" />
+            <span>ম্যানুয়ালি নতুন MCQ যোগ</span>
+          </button>
+
+          {onSwitchTab && (
+            <button
+              onClick={() => onSwitchTab('ai_hub')}
+              className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 text-slate-950 font-bold text-xs transition-all shadow-md active:scale-95 shrink-0"
+            >
+              <Sparkles className="w-4 h-4" />
+              <span>এআই দিয়ে প্রশ্ন জেনারেট / পার্স</span>
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Filter Bar */}

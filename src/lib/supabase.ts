@@ -28,8 +28,8 @@ export const supabase: SupabaseClient | null = isSupabaseConfigured
 export async function checkSupabaseConnection(): Promise<boolean> {
   if (!supabase) return false;
   try {
-    const { error } = await supabase.from('questions').select('id').limit(1);
-    return !error;
+    const res = await withTimeout(supabase.from('questions').select('id').limit(1), 2500);
+    return !res.error;
   } catch {
     return false;
   }
@@ -46,12 +46,33 @@ const STORAGE_KEYS = {
   RESOURCES: 'tamreen_resources_v1',
 };
 
-// Helper to initialize LocalStorage if empty
+// Network timeout wrapper for mobile data stability
+function withTimeout<T = any>(promiseLike: PromiseLike<T>, ms = 3000): Promise<T> {
+  return Promise.race([
+    Promise.resolve(promiseLike),
+    new Promise<T>((_, reject) => setTimeout(() => reject(new Error('Network timeout')), ms))
+  ]);
+}
+
+// Helper to initialize LocalStorage if empty & purge legacy default sample questions
 function initLocalStorage() {
   if (typeof window === 'undefined') return;
-  if (!localStorage.getItem(STORAGE_KEYS.QUESTIONS)) {
-    localStorage.setItem(STORAGE_KEYS.QUESTIONS, JSON.stringify(INITIAL_QUESTIONS));
+
+  // Purge legacy sample questions if present in local storage
+  const legacySampleIds = new Set(['q-101', 'q-102', 'q-103', 'q-104', 'q-105', 'q-106']);
+  const storedQuestions = localStorage.getItem(STORAGE_KEYS.QUESTIONS);
+  if (storedQuestions) {
+    try {
+      const parsed: Question[] = JSON.parse(storedQuestions);
+      const filtered = parsed.filter(q => !legacySampleIds.has(q.id));
+      localStorage.setItem(STORAGE_KEYS.QUESTIONS, JSON.stringify(filtered));
+    } catch {
+      localStorage.setItem(STORAGE_KEYS.QUESTIONS, JSON.stringify([]));
+    }
+  } else {
+    localStorage.setItem(STORAGE_KEYS.QUESTIONS, JSON.stringify([]));
   }
+
   if (!localStorage.getItem(STORAGE_KEYS.MODEL_TESTS)) {
     localStorage.setItem(STORAGE_KEYS.MODEL_TESTS, JSON.stringify(INITIAL_MODEL_TESTS));
   }
@@ -96,9 +117,9 @@ function setLocal<T>(key: string, value: T[]) {
 export async function getQuestions(): Promise<Question[]> {
   if (supabase) {
     try {
-      const { data, error } = await supabase.from('questions').select('*').order('created_at', { ascending: false });
-      if (!error && data && data.length > 0) {
-        return data as Question[];
+      const res = await withTimeout(supabase.from('questions').select('*').order('created_at', { ascending: false }), 2500);
+      if (!res.error && res.data && res.data.length > 0) {
+        return res.data as Question[];
       }
     } catch (err) {
       console.warn('Supabase fetch failed, falling back to local persistence:', err);
@@ -180,8 +201,8 @@ export async function deleteQuestion(id: string): Promise<boolean> {
 export async function getModelTests(): Promise<ModelTest[]> {
   if (supabase) {
     try {
-      const { data, error } = await supabase.from('model_tests').select('*').order('created_at', { ascending: false });
-      if (!error && data && data.length > 0) return data as ModelTest[];
+      const res = await withTimeout(supabase.from('model_tests').select('*').order('created_at', { ascending: false }), 2500);
+      if (!res.error && res.data && res.data.length > 0) return res.data as ModelTest[];
     } catch (err) {
       console.warn('Supabase model tests fetch failed:', err);
     }
@@ -238,8 +259,8 @@ export async function deleteModelTest(id: string): Promise<boolean> {
 export async function getCourses(): Promise<Course[]> {
   if (supabase) {
     try {
-      const { data, error } = await supabase.from('courses').select('*').order('created_at', { ascending: false });
-      if (!error && data && data.length > 0) return data as Course[];
+      const res = await withTimeout(supabase.from('courses').select('*').order('created_at', { ascending: false }), 2500);
+      if (!res.error && res.data && res.data.length > 0) return res.data as Course[];
     } catch (err) {
       console.warn('Supabase courses fetch failed:', err);
     }
@@ -283,8 +304,8 @@ export async function saveCourse(course: Omit<Course, 'id' | 'created_at'> & { i
 export async function getUsers(): Promise<UserProfile[]> {
   if (supabase) {
     try {
-      const { data, error } = await supabase.from('users_profile').select('*').order('created_at', { ascending: false });
-      if (!error && data && data.length > 0) return data as UserProfile[];
+      const res = await withTimeout(supabase.from('users_profile').select('*').order('created_at', { ascending: false }), 2500);
+      if (!res.error && res.data && res.data.length > 0) return res.data as UserProfile[];
     } catch (err) {
       console.warn('Supabase users fetch failed:', err);
     }
@@ -319,8 +340,8 @@ export async function toggleUserVip(userId: string, currentVip: boolean): Promis
 export async function getWrittenQuestions(): Promise<WrittenQuestion[]> {
   if (supabase) {
     try {
-      const { data, error } = await supabase.from('written_questions').select('*').order('created_at', { ascending: false });
-      if (!error && data && data.length > 0) return data as WrittenQuestion[];
+      const res = await withTimeout(supabase.from('written_questions').select('*').order('created_at', { ascending: false }), 2500);
+      if (!res.error && res.data && res.data.length > 0) return res.data as WrittenQuestion[];
     } catch (err) {
       console.warn('Supabase written fetch failed:', err);
     }
@@ -361,8 +382,8 @@ export async function saveWrittenQuestion(wq: Omit<WrittenQuestion, 'id' | 'crea
 export async function getGlossaryTerms(): Promise<GlossaryTerm[]> {
   if (supabase) {
     try {
-      const { data, error } = await supabase.from('glossary').select('*').order('created_at', { ascending: false });
-      if (!error && data && data.length > 0) return data as GlossaryTerm[];
+      const res = await withTimeout(supabase.from('glossary').select('*').order('created_at', { ascending: false }), 2500);
+      if (!res.error && res.data && res.data.length > 0) return res.data as GlossaryTerm[];
     } catch (err) {
       console.warn('Supabase glossary fetch failed:', err);
     }
@@ -415,8 +436,8 @@ export async function deleteGlossaryTerm(id: string): Promise<boolean> {
 export async function getLectureSheets(): Promise<LectureSheet[]> {
   if (supabase) {
     try {
-      const { data, error } = await supabase.from('resources').select('*').order('created_at', { ascending: false });
-      if (!error && data && data.length > 0) return data as LectureSheet[];
+      const res = await withTimeout(supabase.from('resources').select('*').order('created_at', { ascending: false }), 2500);
+      if (!res.error && res.data && res.data.length > 0) return res.data as LectureSheet[];
     } catch (err) {
       console.warn('Supabase resources fetch failed:', err);
     }

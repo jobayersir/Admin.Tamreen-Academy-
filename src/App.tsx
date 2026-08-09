@@ -362,6 +362,7 @@ const AdminAppContent: React.FC = () => {
                   onAddCustomSubject={handleAddCustomSubject}
                   onSaveQuestion={handleSaveQuestion}
                   onDeleteQuestion={handleDeleteQuestion}
+                  onSwitchTab={setActiveTab}
                 />
               )}
 
