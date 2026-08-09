@@ -17,7 +17,9 @@ import {
   MoveDown,
   Sparkles,
   ChevronRight,
-  X
+  X,
+  FileEdit,
+  Globe
 } from 'lucide-react';
 import { ModelTest, Question, Subject, CadreTier } from '../../types';
 import { useToast } from '../Toast';
@@ -167,8 +169,7 @@ export const ModelTestsTab: React.FC<Props> = ({
     setIsModalOpen(true);
   };
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleSaveWithStatus = async (publishState: boolean) => {
     if (!formData.title.trim()) {
       showToast('Error', 'মডেল টেস্ট শিরোনাম টাইপ করুন', 'error');
       return;
@@ -186,19 +187,32 @@ export const ModelTestsTab: React.FC<Props> = ({
         pass_mark: Number(formData.pass_mark),
         negative_marking: formData.negative_marking,
         is_premium: formData.is_premium,
-        is_published: formData.is_published,
+        is_published: publishState,
         question_ids: formData.question_ids
       });
 
-      showToast(
-        editingTest ? 'Model Test Updated' : 'Model Test Created',
-        `"${formData.title}" সফলভাবে সংরক্ষিত হয়েছে।`,
-        'success'
-      );
+      if (publishState) {
+        showToast(
+          'সরাসরি পাবলিশড ও লাইভ!',
+          `"${formData.title}" মডেল টেস্টটি এখন অ্যাপে শিক্ষার্থীদের জন্য লাইভ উপলব্ধ।`,
+          'success'
+        );
+      } else {
+        showToast(
+          'ড্রাফট হিসেবে সংরক্ষিত',
+          `"${formData.title}" খসড়া ফোল্ডারে সেভ করা হয়েছে (অ্যাপে এখনো লাইভ নয়)।`,
+          'info'
+        );
+      }
       setIsModalOpen(false);
     } catch (err: any) {
       showToast('Save Failed', err.message, 'error');
     }
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    await handleSaveWithStatus(formData.is_published);
   };
 
   const handleToggleQuestionInTest = (qId: string) => {
@@ -527,37 +541,54 @@ export const ModelTestsTab: React.FC<Props> = ({
                 </div>
               </div>
 
-              {/* Toggles */}
-              <div className="flex flex-wrap items-center gap-6 p-3 bg-slate-950 rounded-xl border border-slate-800">
-                <label className="flex items-center gap-2 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={formData.negative_marking}
-                    onChange={(e) => setFormData({ ...formData, negative_marking: e.target.checked })}
-                    className="rounded border-slate-700 bg-slate-900 text-emerald-500 focus:ring-emerald-500"
-                  />
-                  <span>নেগেটিভ মার্কিং (0.25 মার্ক কাটা যাবে)</span>
-                </label>
+              {/* Toggles & Publishing Options */}
+              <div className="flex flex-wrap items-center justify-between gap-4 p-3 bg-slate-950 rounded-xl border border-slate-800">
+                <div className="flex flex-wrap items-center gap-5">
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={formData.negative_marking}
+                      onChange={(e) => setFormData({ ...formData, negative_marking: e.target.checked })}
+                      className="rounded border-slate-700 bg-slate-900 text-emerald-500 focus:ring-emerald-500"
+                    />
+                    <span>নেগেটিভ মার্কিং (0.25 কাটা যাবে)</span>
+                  </label>
 
-                <label className="flex items-center gap-2 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={formData.is_premium}
-                    onChange={(e) => setFormData({ ...formData, is_premium: e.target.checked })}
-                    className="rounded border-slate-700 bg-slate-900 text-amber-500 focus:ring-amber-500"
-                  />
-                  <span className="text-amber-400 font-medium">ভিআইপি প্রিমিয়াম মেম্বার ওনলি</span>
-                </label>
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={formData.is_premium}
+                      onChange={(e) => setFormData({ ...formData, is_premium: e.target.checked })}
+                      className="rounded border-slate-700 bg-slate-900 text-amber-500 focus:ring-amber-500"
+                    />
+                    <span className="text-amber-400 font-medium">ভিআইপি প্রিমিয়াম মেম্বার ওনলি</span>
+                  </label>
+                </div>
 
-                <label className="flex items-center gap-2 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={formData.is_published}
-                    onChange={(e) => setFormData({ ...formData, is_published: e.target.checked })}
-                    className="rounded border-slate-700 bg-slate-900 text-emerald-500 focus:ring-emerald-500"
-                  />
-                  <span>সরাসরি পাবলিশ করুন</span>
-                </label>
+                <div className="flex items-center gap-1.5 bg-slate-900 p-1 rounded-lg border border-slate-800">
+                  <button
+                    type="button"
+                    onClick={() => setFormData({ ...formData, is_published: false })}
+                    className={`px-3 py-1 rounded-md text-xs font-semibold transition-all ${
+                      !formData.is_published
+                        ? 'bg-amber-950/80 text-amber-300 border border-amber-800 shadow'
+                        : 'text-slate-400 hover:text-white'
+                    }`}
+                  >
+                    ড্রাফট (Draft)
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setFormData({ ...formData, is_published: true })}
+                    className={`px-3 py-1 rounded-md text-xs font-semibold transition-all ${
+                      formData.is_published
+                        ? 'bg-emerald-600 text-white shadow-md'
+                        : 'text-slate-400 hover:text-white'
+                    }`}
+                  >
+                    পাবলিশড (Live)
+                  </button>
+                </div>
               </div>
 
               {/* QUESTION SELECTION MANAGER */}
@@ -631,20 +662,34 @@ export const ModelTestsTab: React.FC<Props> = ({
                 </div>
               </div>
 
-              <div className="flex items-center justify-end gap-3 pt-4 border-t border-slate-800">
+              <div className="flex flex-col sm:flex-row items-center justify-between gap-3 pt-4 border-t border-slate-800">
                 <button
                   type="button"
                   onClick={() => setIsModalOpen(false)}
-                  className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 font-medium"
+                  className="w-full sm:w-auto px-4 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 font-medium text-xs transition-colors"
                 >
-                  বাতিল
+                  বাতিল (Cancel)
                 </button>
-                <button
-                  type="submit"
-                  className="px-5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-semibold shadow-md"
-                >
-                  সংরক্ষণ করুন
-                </button>
+
+                <div className="flex items-center gap-2.5 w-full sm:w-auto justify-end">
+                  <button
+                    type="button"
+                    onClick={() => handleSaveWithStatus(false)}
+                    className="flex-1 sm:flex-initial px-4 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-amber-300 border border-amber-500/30 font-semibold text-xs transition-all shadow-md active:scale-95 flex items-center justify-center gap-1.5"
+                  >
+                    <FileEdit className="w-4 h-4 text-amber-400" />
+                    <span>ড্রাফট সেভ করুন</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => handleSaveWithStatus(true)}
+                    className="flex-1 sm:flex-initial px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs shadow-lg shadow-emerald-950/80 transition-all active:scale-95 flex items-center justify-center gap-1.5"
+                  >
+                    <Globe className="w-4 h-4 text-emerald-200" />
+                    <span>পাবলিশ ও লাইভ করুন</span>
+                  </button>
+                </div>
               </div>
             </form>
           </div>
