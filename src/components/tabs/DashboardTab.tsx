@@ -45,27 +45,27 @@ export const DashboardTab: React.FC<Props> = ({
 }) => {
   const activeModelTests = modelTests.filter((m) => m.is_published).length;
   const vipUsersCount = users.filter((u) => u.is_vip).length;
-  const totalEnrolled = courses.reduce((acc, c) => acc + (c.enrolled_count || 0), 0) + users.length * 4;
+  const totalEnrolled = courses.reduce((acc, c) => acc + (c.enrolled_count || 0), 0);
 
-  // Chart 1: Participation over the last 7 days
+  // Chart 1: Participation overview
   const participationData = [
-    { day: 'শনিবার', attempts: 420, passRate: 78 },
-    { day: 'রবিবার', attempts: 580, passRate: 82 },
-    { day: 'সোমবার', attempts: 690, passRate: 75 },
-    { day: 'মঙ্গলবার', attempts: 810, passRate: 85 },
-    { day: 'বুধবার', attempts: 940, passRate: 88 },
-    { day: 'বৃহস্পতিবার', attempts: 1120, passRate: 91 },
-    { day: 'শুক্রবার', attempts: 1350, passRate: 94 }
+    { day: 'শনিবার', attempts: 0, passRate: 0 },
+    { day: 'রবিবার', attempts: 0, passRate: 0 },
+    { day: 'সোমবার', attempts: 0, passRate: 0 },
+    { day: 'মঙ্গলবার', attempts: 0, passRate: 0 },
+    { day: 'বুধবার', attempts: 0, passRate: 0 },
+    { day: 'বৃহস্পতিবার', attempts: 0, passRate: 0 },
+    { day: 'শুক্রবার', attempts: 0, passRate: 0 }
   ];
 
-  // Chart 2: Subject distribution
+  // Chart 2: Subject distribution from actual question bank
   const subjectDistribution = [
-    { name: 'বালাগাত-মানতিক', count: questions.filter((q) => q.subject === 'বালাগাত ও মানতিক').length + 18 },
-    { name: 'আল-কুরআন', count: questions.filter((q) => q.subject === 'আল-কুরআন').length + 24 },
-    { name: 'হাদিস', count: questions.filter((q) => q.subject === 'হাদিস').length + 15 },
-    { name: 'ফিকহ্ ও উসুল', count: questions.filter((q) => q.subject === 'ফিকহ্ ও উসুল').length + 22 },
-    { name: 'বাংলা', count: questions.filter((q) => q.subject === 'বাংলা').length + 12 },
-    { name: 'ইংরেজি ও আইসিটি', count: questions.filter((q) => q.subject === 'ইংরেজি' || q.subject === 'আইসিটি ও সাধারণ জ্ঞান').length + 16 }
+    { name: 'বালাগাত-মানতিক', count: questions.filter((q) => q.subject === 'বালাগাত ও মানতিক').length },
+    { name: 'আল-কুরআন', count: questions.filter((q) => q.subject === 'আল-কুরআন').length },
+    { name: 'হাদিস', count: questions.filter((q) => q.subject === 'হাদিস').length },
+    { name: 'ফিকহ্ ও উসুল', count: questions.filter((q) => q.subject === 'ফিকহ্ ও উসুল').length },
+    { name: 'বাংলা', count: questions.filter((q) => q.subject === 'বাংলা').length },
+    { name: 'ইংরেজি ও আইসিটি', count: questions.filter((q) => q.subject === 'ইংরেজি' || q.subject === 'আইসিটি ও সাধারণ জ্ঞান').length }
   ];
 
   return (

@@ -147,43 +147,42 @@ function withTimeout<T = any>(promiseLike: PromiseLike<T>, ms = 3000): Promise<T
   ]);
 }
 
-// Helper to initialize LocalStorage if empty & purge legacy default sample questions
+// Helper to initialize LocalStorage if empty & purge legacy default sample items
 function initLocalStorage() {
   if (typeof window === 'undefined') return;
 
-  // Purge legacy sample questions if present in local storage
-  const legacySampleIds = new Set(['q-101', 'q-102', 'q-103', 'q-104', 'q-105', 'q-106']);
-  const storedQuestions = localStorage.getItem(STORAGE_KEYS.QUESTIONS);
-  if (storedQuestions) {
-    try {
-      const parsed: Question[] = JSON.parse(storedQuestions);
-      const filtered = parsed.filter(q => !legacySampleIds.has(q.id));
-      localStorage.setItem(STORAGE_KEYS.QUESTIONS, JSON.stringify(filtered));
-    } catch {
-      localStorage.setItem(STORAGE_KEYS.QUESTIONS, JSON.stringify([]));
-    }
-  } else {
-    localStorage.setItem(STORAGE_KEYS.QUESTIONS, JSON.stringify([]));
-  }
+  const legacySampleIds = new Set([
+    'q-101', 'q-102', 'q-103', 'q-104', 'q-105', 'q-106',
+    'mt-201', 'mt-202',
+    'c-301', 'c-302',
+    'u-401', 'u-402', 'u-403',
+    'wq-501',
+    'g-601', 'g-602',
+    'rf-701', 'rf-702'
+  ]);
 
-  if (!localStorage.getItem(STORAGE_KEYS.MODEL_TESTS)) {
-    localStorage.setItem(STORAGE_KEYS.MODEL_TESTS, JSON.stringify(INITIAL_MODEL_TESTS));
-  }
-  if (!localStorage.getItem(STORAGE_KEYS.COURSES)) {
-    localStorage.setItem(STORAGE_KEYS.COURSES, JSON.stringify(INITIAL_COURSES));
-  }
-  if (!localStorage.getItem(STORAGE_KEYS.USERS)) {
-    localStorage.setItem(STORAGE_KEYS.USERS, JSON.stringify(INITIAL_USERS));
-  }
-  if (!localStorage.getItem(STORAGE_KEYS.WRITTEN)) {
-    localStorage.setItem(STORAGE_KEYS.WRITTEN, JSON.stringify(INITIAL_WRITTEN_QUESTIONS));
-  }
-  if (!localStorage.getItem(STORAGE_KEYS.GLOSSARY)) {
-    localStorage.setItem(STORAGE_KEYS.GLOSSARY, JSON.stringify(INITIAL_GLOSSARY));
-  }
-  if (!localStorage.getItem(STORAGE_KEYS.RESOURCES)) {
-    localStorage.setItem(STORAGE_KEYS.RESOURCES, JSON.stringify(INITIAL_RESOURCES));
-  }
+  const purgeKey = (key: string) => {
+    const raw = localStorage.getItem(key);
+    if (raw) {
+      try {
+        const parsed: any[] = JSON.parse(raw);
+        const filtered = parsed.filter(item => !item.id || !legacySampleIds.has(item.id));
+        localStorage.setItem(key, JSON.stringify(filtered));
+      } catch {
+        localStorage.setItem(key, JSON.stringify([]));
+      }
+    } else {
+      localStorage.setItem(key, JSON.stringify([]));
+    }
+  };
+
+  purgeKey(STORAGE_KEYS.QUESTIONS);
+  purgeKey(STORAGE_KEYS.MODEL_TESTS);
+  purgeKey(STORAGE_KEYS.COURSES);
+  purgeKey(STORAGE_KEYS.USERS);
+  purgeKey(STORAGE_KEYS.WRITTEN);
+  purgeKey(STORAGE_KEYS.GLOSSARY);
+  purgeKey(STORAGE_KEYS.RESOURCES);
 }
 
 initLocalStorage();
