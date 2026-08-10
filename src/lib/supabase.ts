@@ -206,20 +206,35 @@ function setLocal<T>(key: string, value: T[]) {
   }
 }
 
+// Helper UUID generator for cross-database type compatibility (UUID & TEXT)
+export function generateUuid(): string {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID();
+  }
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
+    const r = (Math.random() * 16) | 0;
+    const v = c === 'x' ? r : (r & 0x3) | 0x8;
+    return v.toString(16);
+  });
+}
+
 // ==================== QUESTIONS API ====================
 export async function getQuestions(): Promise<Question[]> {
   const localList = getLocal<Question>(STORAGE_KEYS.QUESTIONS, INITIAL_QUESTIONS);
-  if (supabase) {
+  const client = getSupabase();
+  if (client) {
     try {
-      const res = await withTimeout(supabase.from('questions').select('*').order('created_at', { ascending: false }), 2500);
-      if (!res.error && res.data) {
+      const res = await withTimeout(client.from('questions').select('*').order('created_at', { ascending: false }), 4000);
+      if (res.error) {
+        console.warn('[Supabase Warn] getQuestions error:', res.error.message);
+      } else if (res.data) {
         const map = new Map<string, Question>();
-        (res.data as Question[]).forEach(item => map.set(item.id, item));
         localList.forEach(item => map.set(item.id, item));
+        (res.data as Question[]).forEach(item => map.set(item.id, item));
         return Array.from(map.values()).sort((a, b) => new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime());
       }
     } catch (err) {
-      console.warn('Supabase fetch failed, falling back to local persistence:', err);
+      console.warn('Supabase fetch questions failed, falling back to local cache:', err);
     }
   }
   return localList;
@@ -227,94 +242,120 @@ export async function getQuestions(): Promise<Question[]> {
 
 export async function saveQuestion(q: Omit<Question, 'id' | 'created_at'> & { id?: string }): Promise<Question> {
   const isEdit = Boolean(q.id);
+  const qId = q.id || generateUuid();
+
   const newQuestion: Question = {
     ...q,
-    id: q.id || 'q-' + Date.now(),
+    id: qId,
+    question_bn: q.question_bn || '',
+    question_ar: q.question_ar || '',
+    options: Array.isArray(q.options) ? q.options : ['', '', '', ''],
+    correct_option: Number(q.correct_option) || 0,
+    explanation: q.explanation || '',
+    subject: q.subject || '',
+    topic: q.topic || '',
+    cadre_tier: q.cadre_tier || '',
+    difficulty: q.difficulty || 'মাঝারি',
+    usage_count: Number(q.usage_count) || 0,
     created_at: new Date().toISOString()
   } as Question;
 
+  const client = getSupabase();
+  let savedRecord = newQuestion;
+
+  if (client) {
+    console.log('[Supabase API] Saving question record...', newQuestion);
+    if (isEdit) {
+      const { data, error } = await client.from('questions').update(newQuestion).eq('id', newQuestion.id).select();
+      if (error) {
+        console.error('[Supabase Error] Update question error:', error);
+        throw new Error(`Supabase-এ প্রশ্ন সেভ ব্যর্থ: ${error.message} (Code: ${error.code || 'UNKNOWN'})`);
+      }
+      if (data && data.length > 0) savedRecord = data[0] as Question;
+    } else {
+      const { data, error } = await client.from('questions').insert([newQuestion]).select();
+      if (error) {
+        console.error('[Supabase Error] Insert question error:', error);
+        throw new Error(`Supabase-এ প্রশ্ন ইনসার্ট ব্যর্থ: ${error.message} (Code: ${error.code || 'UNKNOWN'})`);
+      }
+      if (data && data.length > 0) savedRecord = data[0] as Question;
+    }
+  }
+
   const list = getLocal<Question>(STORAGE_KEYS.QUESTIONS, INITIAL_QUESTIONS);
   if (isEdit) {
-    const idx = list.findIndex(item => item.id === newQuestion.id);
-    if (idx !== -1) list[idx] = newQuestion;
-    else list.unshift(newQuestion);
+    const idx = list.findIndex(item => item.id === savedRecord.id);
+    if (idx !== -1) list[idx] = savedRecord;
+    else list.unshift(savedRecord);
   } else {
-    list.unshift(newQuestion);
+    list.unshift(savedRecord);
   }
   setLocal(STORAGE_KEYS.QUESTIONS, list);
 
-  if (supabase) {
-    try {
-      if (isEdit) {
-        const { error } = await supabase.from('questions').update(newQuestion).eq('id', newQuestion.id);
-        if (error) console.warn('Supabase questions update error:', error.message);
-      } else {
-        const { error } = await supabase.from('questions').insert([newQuestion]);
-        if (error) console.warn('Supabase questions insert error:', error.message);
-      }
-    } catch (err) {
-      console.warn('Supabase insert failed:', err);
-    }
-  }
-
-  return newQuestion;
+  return savedRecord;
 }
 
 export async function bulkSaveQuestions(qs: Omit<Question, 'id' | 'created_at'>[]): Promise<Question[]> {
-  const newQuestions: Question[] = qs.map((q, idx) => ({
+  const newQuestions: Question[] = qs.map((q) => ({
     ...q,
-    id: `q-${Date.now()}-${idx}`,
+    id: generateUuid(),
     created_at: new Date().toISOString()
   }));
 
-  const list = getLocal<Question>(STORAGE_KEYS.QUESTIONS, INITIAL_QUESTIONS);
-  const updated = [...newQuestions, ...list];
-  setLocal(STORAGE_KEYS.QUESTIONS, updated);
+  const client = getSupabase();
+  let savedList = newQuestions;
 
-  if (supabase) {
-    try {
-      const { data, error } = await supabase.from('questions').insert(newQuestions).select();
-      if (error) console.warn('Supabase bulk save questions error:', error.message);
-      if (!error && data && data.length > 0) return data as Question[];
-    } catch (err) {
-      console.warn('Supabase bulk insert failed:', err);
+  if (client) {
+    console.log('[Supabase API] Bulk saving questions:', newQuestions.length);
+    const { data, error } = await client.from('questions').insert(newQuestions).select();
+    if (error) {
+      console.error('[Supabase Error] Bulk insert questions error:', error);
+      throw new Error(`Supabase-এ বাল্ক প্রশ্ন সেভ ব্যর্থ: ${error.message}`);
     }
+    if (data && data.length > 0) savedList = data as Question[];
   }
 
-  return newQuestions;
+  const list = getLocal<Question>(STORAGE_KEYS.QUESTIONS, INITIAL_QUESTIONS);
+  const updated = [...savedList, ...list];
+  setLocal(STORAGE_KEYS.QUESTIONS, updated);
+
+  return savedList;
 }
 
 export async function deleteQuestion(id: string): Promise<boolean> {
-  const list = getLocal<Question>(STORAGE_KEYS.QUESTIONS, INITIAL_QUESTIONS);
-  const filtered = list.filter(q => q.id !== id);
-  setLocal(STORAGE_KEYS.QUESTIONS, filtered);
-
-  if (supabase) {
-    try {
-      const { error } = await supabase.from('questions').delete().eq('id', id);
-      if (error) console.warn('Supabase question delete error:', error.message);
-    } catch (err) {
-      console.warn('Supabase delete failed:', err);
+  const client = getSupabase();
+  if (client) {
+    const { error } = await client.from('questions').delete().eq('id', id);
+    if (error) {
+      console.error('[Supabase Error] Delete question error:', error);
+      throw new Error(`Supabase-এ প্রশ্ন ডিলিট ব্যর্থ: ${error.message}`);
     }
   }
 
+  const list = getLocal<Question>(STORAGE_KEYS.QUESTIONS, INITIAL_QUESTIONS);
+  setLocal(STORAGE_KEYS.QUESTIONS, list.filter(q => q.id !== id));
   return true;
 }
 
 // ==================== MODEL TESTS API ====================
 export async function getModelTests(): Promise<ModelTest[]> {
   const localList = getLocal<ModelTest>(STORAGE_KEYS.MODEL_TESTS, INITIAL_MODEL_TESTS);
-  if (supabase) {
+  const client = getSupabase();
+  if (client) {
     try {
-      const res = await withTimeout(supabase.from('model_tests').select('*').order('created_at', { ascending: false }), 2500);
-      if (!res.error && res.data) {
+      const res = await withTimeout(client.from('model_tests').select('*').order('created_at', { ascending: false }), 4000);
+      if (res.error) {
+        console.warn('[Supabase Warn] getModelTests query error:', res.error.message);
+      } else if (res.data) {
         const map = new Map<string, ModelTest>();
-        (res.data as ModelTest[]).forEach(item => map.set(item.id, item));
+        // Set local cached items first
         localList.forEach(item => map.set(item.id, item));
+        // Overwrite with live Supabase database records
+        (res.data as ModelTest[]).forEach(item => map.set(item.id, item));
         return Array.from(map.values()).sort((a, b) => new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime());
       }
     } catch (err) {
-      console.warn('Supabase model tests fetch failed:', err);
+      console.warn('Supabase model tests fetch failed, using local cache:', err);
     }
   }
   return localList;
@@ -322,65 +363,104 @@ export async function getModelTests(): Promise<ModelTest[]> {
 
 export async function saveModelTest(test: Omit<ModelTest, 'id' | 'created_at'> & { id?: string }): Promise<ModelTest> {
   const isEdit = Boolean(test.id);
+  const testId = test.id || generateUuid();
+
   const modelTest: ModelTest = {
     ...test,
-    id: test.id || 'mt-' + Date.now(),
+    id: testId,
+    title: test.title || '',
+    subtitle: test.subtitle || '',
+    subject: test.subject || '',
+    cadre_tier: test.cadre_tier || '',
+    duration_minutes: Number(test.duration_minutes) || 60,
+    total_marks: Number(test.total_marks) || 100,
+    pass_mark: Number(test.pass_mark) || 50,
+    negative_marking: Boolean(test.negative_marking),
+    is_premium: Boolean(test.is_premium),
+    is_published: Boolean(test.is_published),
+    question_ids: Array.isArray(test.question_ids) ? test.question_ids : [],
     created_at: new Date().toISOString()
   } as ModelTest;
 
+  const client = getSupabase();
+  let savedRecord = modelTest;
+
+  if (client) {
+    console.log('[Supabase API] Saving model_test record:', modelTest);
+    if (isEdit) {
+      const { data, error } = await client
+        .from('model_tests')
+        .update(modelTest)
+        .eq('id', modelTest.id)
+        .select();
+
+      if (error) {
+        console.error('[Supabase Error] Update model_tests error:', error);
+        throw new Error(`Supabase-এ মডেল টেস্ট আপডেট ব্যর্থ হয়েছে: ${error.message} (Code: ${error.code || 'UNKNOWN'})`);
+      }
+      if (data && data.length > 0) {
+        savedRecord = data[0] as ModelTest;
+      }
+    } else {
+      const { data, error } = await client
+        .from('model_tests')
+        .insert([modelTest])
+        .select();
+
+      if (error) {
+        console.error('[Supabase Error] Insert model_tests error:', error);
+        throw new Error(`Supabase-এ মডেল টেস্ট সংরক্ষণ ব্যর্থ হয়েছে: ${error.message} (Code: ${error.code || 'UNKNOWN'})`);
+      }
+      if (data && data.length > 0) {
+        savedRecord = data[0] as ModelTest;
+      }
+    }
+    console.log('[Supabase API Success] Model test committed to PostgreSQL database:', savedRecord);
+  }
+
+  // Update local storage cache
   const list = getLocal<ModelTest>(STORAGE_KEYS.MODEL_TESTS, INITIAL_MODEL_TESTS);
   if (isEdit) {
-    const idx = list.findIndex(m => m.id === modelTest.id);
-    if (idx !== -1) list[idx] = modelTest;
-    else list.unshift(modelTest);
+    const idx = list.findIndex(m => m.id === savedRecord.id);
+    if (idx !== -1) list[idx] = savedRecord;
+    else list.unshift(savedRecord);
   } else {
-    list.unshift(modelTest);
+    list.unshift(savedRecord);
   }
   setLocal(STORAGE_KEYS.MODEL_TESTS, list);
 
-  if (supabase) {
-    try {
-      if (isEdit) {
-        const { error } = await supabase.from('model_tests').update(modelTest).eq('id', modelTest.id);
-        if (error) console.warn('Supabase model_tests update error:', error.message);
-      } else {
-        const { error } = await supabase.from('model_tests').insert([modelTest]);
-        if (error) console.warn('Supabase model_tests insert error:', error.message);
-      }
-    } catch (err) {
-      console.warn('Supabase model test save failed:', err);
-    }
-  }
-
-  return modelTest;
+  return savedRecord;
 }
 
 export async function deleteModelTest(id: string): Promise<boolean> {
-  const list = getLocal<ModelTest>(STORAGE_KEYS.MODEL_TESTS, INITIAL_MODEL_TESTS);
-  setLocal(STORAGE_KEYS.MODEL_TESTS, list.filter(m => m.id !== id));
-
-  if (supabase) {
-    try {
-      const { error } = await supabase.from('model_tests').delete().eq('id', id);
-      if (error) console.warn('Supabase delete model test error:', error.message);
-    } catch (err) {
-      console.warn('Supabase delete model test failed:', err);
+  const client = getSupabase();
+  if (client) {
+    console.log('[Supabase API] Deleting model_test:', id);
+    const { error } = await client.from('model_tests').delete().eq('id', id);
+    if (error) {
+      console.error('[Supabase Error] Delete model_test error:', error);
+      throw new Error(`Supabase-এ মডেল টেস্ট মুছতে ব্যর্থ: ${error.message}`);
     }
   }
 
+  const list = getLocal<ModelTest>(STORAGE_KEYS.MODEL_TESTS, INITIAL_MODEL_TESTS);
+  setLocal(STORAGE_KEYS.MODEL_TESTS, list.filter(m => m.id !== id));
   return true;
 }
 
 // ==================== COURSES API ====================
 export async function getCourses(): Promise<Course[]> {
   const localList = getLocal<Course>(STORAGE_KEYS.COURSES, INITIAL_COURSES);
-  if (supabase) {
+  const client = getSupabase();
+  if (client) {
     try {
-      const res = await withTimeout(supabase.from('courses').select('*').order('created_at', { ascending: false }), 2500);
-      if (!res.error && res.data) {
+      const res = await withTimeout(client.from('courses').select('*').order('created_at', { ascending: false }), 4000);
+      if (res.error) {
+        console.warn('[Supabase Warn] getCourses query error:', res.error.message);
+      } else if (res.data) {
         const map = new Map<string, Course>();
-        (res.data as Course[]).forEach(item => map.set(item.id, item));
         localList.forEach(item => map.set(item.id, item));
+        (res.data as Course[]).forEach(item => map.set(item.id, item));
         return Array.from(map.values()).sort((a, b) => new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime());
       }
     } catch (err) {
@@ -392,49 +472,88 @@ export async function getCourses(): Promise<Course[]> {
 
 export async function saveCourse(course: Omit<Course, 'id' | 'created_at'> & { id?: string }): Promise<Course> {
   const isEdit = Boolean(course.id);
+  const courseId = course.id || generateUuid();
+
   const fullCourse: Course = {
     ...course,
-    id: course.id || 'c-' + Date.now(),
+    id: courseId,
+    title: course.title || '',
+    description: course.description || '',
+    subject: course.subject || '',
+    cadre_tier: course.cadre_tier || '',
+    price_monthly: Number(course.price_monthly) || 299,
+    price_6month: Number(course.price_6month) || 999,
+    price_annual: Number(course.price_annual) || 1499,
+    image_url: course.image_url || '',
+    is_published: Boolean(course.is_published),
+    enrolled_count: Number(course.enrolled_count) || 0,
+    modules: Array.isArray(course.modules) ? course.modules : [],
     created_at: new Date().toISOString()
   } as Course;
 
-  const list = getLocal<Course>(STORAGE_KEYS.COURSES, INITIAL_COURSES);
-  if (isEdit) {
-    const idx = list.findIndex(c => c.id === fullCourse.id);
-    if (idx !== -1) list[idx] = fullCourse;
-    else list.unshift(fullCourse);
-  } else {
-    list.unshift(fullCourse);
-  }
-  setLocal(STORAGE_KEYS.COURSES, list);
+  const client = getSupabase();
+  let savedRecord = fullCourse;
 
-  if (supabase) {
-    try {
-      if (isEdit) {
-        const { error } = await supabase.from('courses').update(fullCourse).eq('id', fullCourse.id);
-        if (error) console.warn('Supabase courses update error:', error.message);
-      } else {
-        const { error } = await supabase.from('courses').insert([fullCourse]);
-        if (error) console.warn('Supabase courses insert error:', error.message);
+  if (client) {
+    console.log('[Supabase API] Saving course record...', fullCourse);
+    if (isEdit) {
+      const { data, error } = await client.from('courses').update(fullCourse).eq('id', fullCourse.id).select();
+      if (error) {
+        console.error('[Supabase Error] Update courses error:', error);
+        throw new Error(`Supabase-এ কোর্স আপডেট ব্যর্থ: ${error.message}`);
       }
-    } catch (err) {
-      console.warn('Supabase save course failed:', err);
+      if (data && data.length > 0) savedRecord = data[0] as Course;
+    } else {
+      const { data, error } = await client.from('courses').insert([fullCourse]).select();
+      if (error) {
+        console.error('[Supabase Error] Insert courses error:', error);
+        throw new Error(`Supabase-এ কোর্স ইনসার্ট ব্যর্থ: ${error.message}`);
+      }
+      if (data && data.length > 0) savedRecord = data[0] as Course;
     }
   }
 
-  return fullCourse;
+  const list = getLocal<Course>(STORAGE_KEYS.COURSES, INITIAL_COURSES);
+  if (isEdit) {
+    const idx = list.findIndex(c => c.id === savedRecord.id);
+    if (idx !== -1) list[idx] = savedRecord;
+    else list.unshift(savedRecord);
+  } else {
+    list.unshift(savedRecord);
+  }
+  setLocal(STORAGE_KEYS.COURSES, list);
+
+  return savedRecord;
+}
+
+export async function deleteCourse(id: string): Promise<boolean> {
+  const client = getSupabase();
+  if (client) {
+    const { error } = await client.from('courses').delete().eq('id', id);
+    if (error) {
+      console.error('[Supabase Error] Delete course error:', error);
+      throw new Error(`Supabase-এ কোর্স ডিলিট ব্যর্থ: ${error.message}`);
+    }
+  }
+
+  const list = getLocal<Course>(STORAGE_KEYS.COURSES, INITIAL_COURSES);
+  setLocal(STORAGE_KEYS.COURSES, list.filter(c => c.id !== id));
+  return true;
 }
 
 // ==================== USERS & SUBSCRIPTIONS API ====================
 export async function getUsers(): Promise<UserProfile[]> {
   const localList = getLocal<UserProfile>(STORAGE_KEYS.USERS, INITIAL_USERS);
-  if (supabase) {
+  const client = getSupabase();
+  if (client) {
     try {
-      const res = await withTimeout(supabase.from('users_profile').select('*').order('created_at', { ascending: false }), 2500);
-      if (!res.error && res.data) {
+      const res = await withTimeout(client.from('users_profile').select('*').order('created_at', { ascending: false }), 4000);
+      if (res.error) {
+        console.warn('[Supabase Warn] getUsers query error:', res.error.message);
+      } else if (res.data) {
         const map = new Map<string, UserProfile>();
-        (res.data as UserProfile[]).forEach(item => map.set(item.id, item));
         localList.forEach(item => map.set(item.id, item));
+        (res.data as UserProfile[]).forEach(item => map.set(item.id, item));
         return Array.from(map.values()).sort((a, b) => new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime());
       }
     } catch (err) {
@@ -448,6 +567,15 @@ export async function toggleUserVip(userId: string, currentVip: boolean): Promis
   const isVip = !currentVip;
   const expiresAt = isVip ? new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString() : undefined;
 
+  const client = getSupabase();
+  if (client) {
+    const { error } = await client.from('users_profile').update({ is_vip: isVip, subscription_expires_at: expiresAt }).eq('id', userId);
+    if (error) {
+      console.error('[Supabase Error] Toggle VIP error:', error);
+      throw new Error(`Supabase-এ ভিআইপি আপডেট ব্যর্থ: ${error.message}`);
+    }
+  }
+
   const list = getLocal<UserProfile>(STORAGE_KEYS.USERS, INITIAL_USERS);
   const idx = list.findIndex(u => u.id === userId);
   let updatedUser: UserProfile | null = null;
@@ -458,15 +586,6 @@ export async function toggleUserVip(userId: string, currentVip: boolean): Promis
     updatedUser = list[idx];
   }
 
-  if (supabase) {
-    try {
-      const { error } = await supabase.from('users_profile').update({ is_vip: isVip, subscription_expires_at: expiresAt }).eq('id', userId);
-      if (error) console.warn('Supabase toggle VIP error:', error.message);
-    } catch (err) {
-      console.warn('Supabase toggle VIP failed:', err);
-    }
-  }
-
   if (updatedUser) return updatedUser;
   throw new Error('User not found');
 }
@@ -474,13 +593,16 @@ export async function toggleUserVip(userId: string, currentVip: boolean): Promis
 // ==================== WRITTEN QUESTIONS API ====================
 export async function getWrittenQuestions(): Promise<WrittenQuestion[]> {
   const localList = getLocal<WrittenQuestion>(STORAGE_KEYS.WRITTEN, INITIAL_WRITTEN_QUESTIONS);
-  if (supabase) {
+  const client = getSupabase();
+  if (client) {
     try {
-      const res = await withTimeout(supabase.from('written_questions').select('*').order('created_at', { ascending: false }), 2500);
-      if (!res.error && res.data) {
+      const res = await withTimeout(client.from('written_questions').select('*').order('created_at', { ascending: false }), 4000);
+      if (res.error) {
+        console.warn('[Supabase Warn] getWrittenQuestions error:', res.error.message);
+      } else if (res.data) {
         const map = new Map<string, WrittenQuestion>();
-        (res.data as WrittenQuestion[]).forEach(item => map.set(item.id, item));
         localList.forEach(item => map.set(item.id, item));
+        (res.data as WrittenQuestion[]).forEach(item => map.set(item.id, item));
         return Array.from(map.values()).sort((a, b) => new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime());
       }
     } catch (err) {
@@ -494,42 +616,57 @@ export async function saveWrittenQuestion(wq: Omit<WrittenQuestion, 'id' | 'crea
   const isEdit = Boolean(wq.id);
   const item: WrittenQuestion = {
     ...wq,
-    id: wq.id || 'wq-' + Date.now(),
+    id: wq.id || generateUuid(),
     created_at: new Date().toISOString()
   };
 
-  const list = getLocal<WrittenQuestion>(STORAGE_KEYS.WRITTEN, INITIAL_WRITTEN_QUESTIONS);
-  if (isEdit) {
-    const idx = list.findIndex(w => w.id === item.id);
-    if (idx !== -1) list[idx] = item;
-    else list.unshift(item);
-  } else {
-    list.unshift(item);
-  }
-  setLocal(STORAGE_KEYS.WRITTEN, list);
+  const client = getSupabase();
+  let savedRecord = item;
 
-  if (supabase) {
-    try {
-      if (isEdit) await supabase.from('written_questions').update(item).eq('id', item.id);
-      else await supabase.from('written_questions').insert([item]);
-    } catch (err) {
-      console.warn('Supabase save written failed:', err);
+  if (client) {
+    if (isEdit) {
+      const { data, error } = await client.from('written_questions').update(item).eq('id', item.id).select();
+      if (error) {
+        console.error('[Supabase Error] Update written question error:', error);
+        throw new Error(`Supabase-এ সেভ ব্যর্থ: ${error.message}`);
+      }
+      if (data && data.length > 0) savedRecord = data[0] as WrittenQuestion;
+    } else {
+      const { data, error } = await client.from('written_questions').insert([item]).select();
+      if (error) {
+        console.error('[Supabase Error] Insert written question error:', error);
+        throw new Error(`Supabase-এ ইনসার্ট ব্যর্থ: ${error.message}`);
+      }
+      if (data && data.length > 0) savedRecord = data[0] as WrittenQuestion;
     }
   }
 
-  return item;
+  const list = getLocal<WrittenQuestion>(STORAGE_KEYS.WRITTEN, INITIAL_WRITTEN_QUESTIONS);
+  if (isEdit) {
+    const idx = list.findIndex(w => w.id === savedRecord.id);
+    if (idx !== -1) list[idx] = savedRecord;
+    else list.unshift(savedRecord);
+  } else {
+    list.unshift(savedRecord);
+  }
+  setLocal(STORAGE_KEYS.WRITTEN, list);
+
+  return savedRecord;
 }
 
 // ==================== GLOSSARY & RESOURCES API ====================
 export async function getGlossaryTerms(): Promise<GlossaryTerm[]> {
   const localList = getLocal<GlossaryTerm>(STORAGE_KEYS.GLOSSARY, INITIAL_GLOSSARY);
-  if (supabase) {
+  const client = getSupabase();
+  if (client) {
     try {
-      const res = await withTimeout(supabase.from('glossary').select('*').order('created_at', { ascending: false }), 2500);
-      if (!res.error && res.data) {
+      const res = await withTimeout(client.from('glossary').select('*').order('created_at', { ascending: false }), 4000);
+      if (res.error) {
+        console.warn('[Supabase Warn] getGlossaryTerms error:', res.error.message);
+      } else if (res.data) {
         const map = new Map<string, GlossaryTerm>();
-        (res.data as GlossaryTerm[]).forEach(item => map.set(item.id, item));
         localList.forEach(item => map.set(item.id, item));
+        (res.data as GlossaryTerm[]).forEach(item => map.set(item.id, item));
         return Array.from(map.values()).sort((a, b) => new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime());
       }
     } catch (err) {
@@ -543,38 +680,51 @@ export async function saveGlossaryTerm(term: Omit<GlossaryTerm, 'id' | 'created_
   const isEdit = Boolean(term.id);
   const item: GlossaryTerm = {
     ...term,
-    id: term.id || 'g-' + Date.now(),
+    id: term.id || generateUuid(),
     created_at: new Date().toISOString()
   };
 
-  const list = getLocal<GlossaryTerm>(STORAGE_KEYS.GLOSSARY, INITIAL_GLOSSARY);
-  if (isEdit) {
-    const idx = list.findIndex(g => g.id === item.id);
-    if (idx !== -1) list[idx] = item;
-    else list.unshift(item);
-  } else {
-    list.unshift(item);
-  }
-  setLocal(STORAGE_KEYS.GLOSSARY, list);
+  const client = getSupabase();
+  let savedRecord = item;
 
-  if (supabase) {
-    try {
-      if (isEdit) await supabase.from('glossary').update(item).eq('id', item.id);
-      else await supabase.from('glossary').insert([item]);
-    } catch (err) {
-      console.warn('Supabase glossary save failed:', err);
+  if (client) {
+    if (isEdit) {
+      const { data, error } = await client.from('glossary').update(item).eq('id', item.id).select();
+      if (error) {
+        console.error('[Supabase Error] Update glossary error:', error);
+        throw new Error(`Supabase-এ সেভ ব্যর্থ: ${error.message}`);
+      }
+      if (data && data.length > 0) savedRecord = data[0] as GlossaryTerm;
+    } else {
+      const { data, error } = await client.from('glossary').insert([item]).select();
+      if (error) {
+        console.error('[Supabase Error] Insert glossary error:', error);
+        throw new Error(`Supabase-এ ইনসার্ট ব্যর্থ: ${error.message}`);
+      }
+      if (data && data.length > 0) savedRecord = data[0] as GlossaryTerm;
     }
   }
 
-  return item;
+  const list = getLocal<GlossaryTerm>(STORAGE_KEYS.GLOSSARY, INITIAL_GLOSSARY);
+  if (isEdit) {
+    const idx = list.findIndex(g => g.id === savedRecord.id);
+    if (idx !== -1) list[idx] = savedRecord;
+    else list.unshift(savedRecord);
+  } else {
+    list.unshift(savedRecord);
+  }
+  setLocal(STORAGE_KEYS.GLOSSARY, list);
+
+  return savedRecord;
 }
 
 export async function deleteGlossaryTerm(id: string): Promise<boolean> {
-  if (supabase) {
-    try {
-      await supabase.from('glossary').delete().eq('id', id);
-    } catch (err) {
-      console.warn('Supabase delete glossary failed:', err);
+  const client = getSupabase();
+  if (client) {
+    const { error } = await client.from('glossary').delete().eq('id', id);
+    if (error) {
+      console.error('[Supabase Error] Delete glossary error:', error);
+      throw new Error(`Supabase-এ গ্লোসারি ডিলিট ব্যর্থ: ${error.message}`);
     }
   }
   const list = getLocal<GlossaryTerm>(STORAGE_KEYS.GLOSSARY, INITIAL_GLOSSARY);
@@ -584,13 +734,16 @@ export async function deleteGlossaryTerm(id: string): Promise<boolean> {
 
 export async function getLectureSheets(): Promise<LectureSheet[]> {
   const localList = getLocal<LectureSheet>(STORAGE_KEYS.RESOURCES, INITIAL_RESOURCES);
-  if (supabase) {
+  const client = getSupabase();
+  if (client) {
     try {
-      const res = await withTimeout(supabase.from('resources').select('*').order('created_at', { ascending: false }), 2500);
-      if (!res.error && res.data) {
+      const res = await withTimeout(client.from('resources').select('*').order('created_at', { ascending: false }), 4000);
+      if (res.error) {
+        console.warn('[Supabase Warn] getLectureSheets error:', res.error.message);
+      } else if (res.data) {
         const map = new Map<string, LectureSheet>();
-        (res.data as LectureSheet[]).forEach(item => map.set(item.id, item));
         localList.forEach(item => map.set(item.id, item));
+        (res.data as LectureSheet[]).forEach(item => map.set(item.id, item));
         return Array.from(map.values()).sort((a, b) => new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime());
       }
     } catch (err) {
@@ -604,38 +757,51 @@ export async function saveLectureSheet(res: Omit<LectureSheet, 'id' | 'created_a
   const isEdit = Boolean(res.id);
   const item: LectureSheet = {
     ...res,
-    id: res.id || 'rf-' + Date.now(),
+    id: res.id || generateUuid(),
     download_count: res.download_count || 0,
     created_at: new Date().toISOString()
   };
 
-  if (supabase) {
-    try {
-      if (isEdit) await supabase.from('resources').update(item).eq('id', item.id);
-      else await supabase.from('resources').insert([item]);
-    } catch (err) {
-      console.warn('Supabase resource save failed:', err);
+  const client = getSupabase();
+  let savedRecord = item;
+
+  if (client) {
+    if (isEdit) {
+      const { data, error } = await client.from('resources').update(item).eq('id', item.id).select();
+      if (error) {
+        console.error('[Supabase Error] Update resource error:', error);
+        throw new Error(`Supabase-এ রিসোর্স আপডেট ব্যর্থ: ${error.message}`);
+      }
+      if (data && data.length > 0) savedRecord = data[0] as LectureSheet;
+    } else {
+      const { data, error } = await client.from('resources').insert([item]).select();
+      if (error) {
+        console.error('[Supabase Error] Insert resource error:', error);
+        throw new Error(`Supabase-এ রিসোর্স ইনসার্ট ব্যর্থ: ${error.message}`);
+      }
+      if (data && data.length > 0) savedRecord = data[0] as LectureSheet;
     }
   }
 
   const list = getLocal<LectureSheet>(STORAGE_KEYS.RESOURCES, INITIAL_RESOURCES);
   if (isEdit) {
-    const idx = list.findIndex(r => r.id === item.id);
-    if (idx !== -1) list[idx] = item;
-    else list.unshift(item);
+    const idx = list.findIndex(r => r.id === savedRecord.id);
+    if (idx !== -1) list[idx] = savedRecord;
+    else list.unshift(savedRecord);
   } else {
-    list.unshift(item);
+    list.unshift(savedRecord);
   }
   setLocal(STORAGE_KEYS.RESOURCES, list);
-  return item;
+  return savedRecord;
 }
 
 export async function deleteLectureSheet(id: string): Promise<boolean> {
-  if (supabase) {
-    try {
-      await supabase.from('resources').delete().eq('id', id);
-    } catch (err) {
-      console.warn('Supabase delete resource failed:', err);
+  const client = getSupabase();
+  if (client) {
+    const { error } = await client.from('resources').delete().eq('id', id);
+    if (error) {
+      console.error('[Supabase Error] Delete resource error:', error);
+      throw new Error(`Supabase-এ রিসোর্স ডিলিট ব্যর্থ: ${error.message}`);
     }
   }
   const list = getLocal<LectureSheet>(STORAGE_KEYS.RESOURCES, INITIAL_RESOURCES);
@@ -649,7 +815,7 @@ export const SUPABASE_SCHEMA_SQL = `-- TAMREEN ACADEMY (তামরীন এ�
 
 -- 1. QUESTIONS TABLE
 CREATE TABLE IF NOT EXISTS public.questions (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  id TEXT PRIMARY KEY,
   question_bn TEXT NOT NULL,
   question_ar TEXT,
   options JSONB NOT NULL,
@@ -660,12 +826,14 @@ CREATE TABLE IF NOT EXISTS public.questions (
   cadre_tier TEXT NOT NULL,
   difficulty TEXT DEFAULT 'মাঝারি',
   usage_count INT DEFAULT 0,
+  time_limit_seconds INT,
+  marks INT,
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
 -- 2. MODEL TESTS TABLE
 CREATE TABLE IF NOT EXISTS public.model_tests (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  id TEXT PRIMARY KEY,
   title TEXT NOT NULL,
   subtitle TEXT,
   subject TEXT NOT NULL,
@@ -682,7 +850,7 @@ CREATE TABLE IF NOT EXISTS public.model_tests (
 
 -- 3. COURSES TABLE
 CREATE TABLE IF NOT EXISTS public.courses (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  id TEXT PRIMARY KEY,
   title TEXT NOT NULL,
   description TEXT,
   subject TEXT NOT NULL,
@@ -699,7 +867,7 @@ CREATE TABLE IF NOT EXISTS public.courses (
 
 -- 4. USERS PROFILE TABLE
 CREATE TABLE IF NOT EXISTS public.users_profile (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  id TEXT PRIMARY KEY,
   name TEXT NOT NULL,
   phone TEXT,
   email TEXT UNIQUE NOT NULL,
@@ -712,7 +880,7 @@ CREATE TABLE IF NOT EXISTS public.users_profile (
 
 -- 5. WRITTEN QUESTIONS TABLE
 CREATE TABLE IF NOT EXISTS public.written_questions (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  id TEXT PRIMARY KEY,
   title TEXT NOT NULL,
   subject TEXT NOT NULL,
   marks INT DEFAULT 10,
@@ -726,7 +894,7 @@ CREATE TABLE IF NOT EXISTS public.written_questions (
 
 -- 6. GLOSSARY TABLE
 CREATE TABLE IF NOT EXISTS public.glossary (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  id TEXT PRIMARY KEY,
   term_ar TEXT NOT NULL,
   root_word TEXT,
   definition_bn TEXT NOT NULL,
@@ -738,7 +906,7 @@ CREATE TABLE IF NOT EXISTS public.glossary (
 
 -- 7. RESOURCES TABLE
 CREATE TABLE IF NOT EXISTS public.resources (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  id TEXT PRIMARY KEY,
   title TEXT NOT NULL,
   subject TEXT NOT NULL,
   file_url TEXT NOT NULL,
@@ -747,6 +915,15 @@ CREATE TABLE IF NOT EXISTS public.resources (
   download_count INT DEFAULT 0,
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
+
+-- DISABLE ROW LEVEL SECURITY (RLS) TO PERMIT DIRECT INSERTS/SELECTS
+ALTER TABLE public.questions DISABLE ROW LEVEL SECURITY;
+ALTER TABLE public.model_tests DISABLE ROW LEVEL SECURITY;
+ALTER TABLE public.courses DISABLE ROW LEVEL SECURITY;
+ALTER TABLE public.users_profile DISABLE ROW LEVEL SECURITY;
+ALTER TABLE public.written_questions DISABLE ROW LEVEL SECURITY;
+ALTER TABLE public.glossary DISABLE ROW LEVEL SECURITY;
+ALTER TABLE public.resources DISABLE ROW LEVEL SECURITY;
 
 -- INDEXES FOR FAST FILTERING
 CREATE INDEX IF NOT EXISTS idx_questions_subject ON public.questions(subject);

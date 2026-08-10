@@ -171,12 +171,12 @@ export const ModelTestsTab: React.FC<Props> = ({
 
   const handleSaveWithStatus = async (publishState: boolean) => {
     if (!formData.title.trim()) {
-      showToast('Error', 'মডেল টেস্ট শিরোনাম টাইপ করুন', 'error');
+      showToast('ত্রুটি', 'মডেল টেস্ট শিরোনাম টাইপ করুন', 'error');
       return;
     }
 
     try {
-      await onSaveModelTest({
+      const saved = await onSaveModelTest({
         id: formData.id || undefined,
         title: formData.title,
         subtitle: formData.subtitle,
@@ -191,22 +191,29 @@ export const ModelTestsTab: React.FC<Props> = ({
         question_ids: formData.question_ids
       });
 
+      const title = saved?.title || formData.title;
+
       if (publishState) {
         showToast(
           'সরাসরি পাবলিশড ও লাইভ!',
-          `"${formData.title}" মডেল টেস্টটি এখন অ্যাপে শিক্ষার্থীদের জন্য লাইভ উপলব্ধ।`,
+          `"${title}" মডেল টেস্টটি সুপাবেস ডাটাবেসে সফলভাবে সংরক্ষিত হয়েছে এবং শিক্ষার্থীদের জন্য অ্যাপে লাইভ করা হয়েছে।`,
           'success'
         );
       } else {
         showToast(
           'ড্রাফট হিসেবে সংরক্ষিত',
-          `"${formData.title}" খসড়া ফোল্ডারে সেভ করা হয়েছে (অ্যাপে এখনো লাইভ নয়)।`,
+          `"${title}" খসড়া ফোল্ডারে সেভ করা হয়েছে (অ্যাপে এখনো লাইভ নয়)।`,
           'info'
         );
       }
       setIsModalOpen(false);
     } catch (err: any) {
-      showToast('Save Failed', err.message, 'error');
+      console.error('[Model Test Save Error]:', err);
+      showToast(
+        'সেভ করা ব্যর্থ হয়েছে!',
+        err.message || 'Supabase ডাটাবেসে মডেল টেস্ট ইনসার্ট করার সময় ত্রুটি ঘটেছে।',
+        'error'
+      );
     }
   };
 

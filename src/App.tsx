@@ -199,6 +199,7 @@ const AdminAppContent: React.FC = () => {
       if (exists) return prev.map((item) => (item.id === saved.id ? saved : item));
       return [saved, ...prev];
     });
+    return saved;
   };
 
   const handleDeleteModelTest = async (id: string) => {
