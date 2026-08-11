@@ -310,6 +310,8 @@ const AdminAppContent: React.FC = () => {
         setActiveTab={setActiveTab}
         isOpen={isSidebarOpen}
         onClose={() => setIsSidebarOpen(false)}
+        questionCount={questions.length}
+        modelTestCount={modelTests.length}
       />
 
       {/* Main Layout Area */}
@@ -384,6 +386,8 @@ const AdminAppContent: React.FC = () => {
                 <AIGeneratorTab
                   onBulkAddQuestions={handleBulkAddQuestions}
                   onAddSingleQuestion={handleSaveQuestion}
+                  customSubjects={customSubjects}
+                  onAddCustomSubject={handleAddCustomSubject}
                 />
               )}
 

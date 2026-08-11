@@ -199,31 +199,64 @@ function localFallbackParseText(rawText: string, defaultSubject = 'বালা�
 
 // Mode 3: Fully Automated AI Question Generator
 app.post('/api/ai/generate-questions', async (req, res) => {
-  const { subject, topic, cadreTier, count, difficulty } = req.body;
+  const { subject, topic, cadreTier, count, difficulty, languagePreference } = req.body;
   const reqCount = Math.min(Math.max(Number(count) || 5, 1), 20);
+  const langMode = languagePreference || 'bn_ar';
 
   try {
     const ai = getAI();
-    const prompt = `
-Create ${reqCount} authentic, high-quality, non-repetitive multiple-choice questions (MCQs) for Tamreen Academy (তামরীন একাডেমি).
-Target Exam Tier: ${cadreTier || 'প্রভাষক (আরবি)'}
+    let promptInstruction = '';
+
+    if (langMode === 'ar_only') {
+      promptInstruction = `
+Create ${reqCount} authentic multiple-choice questions (MCQs) completely in Classical Arabic (اللغة العربية الفصحى) with proper diacritics/tashkeel.
+Target Exam Cadre / Post: ${cadreTier || 'প্রভাষক (আরবি)'}
+Subject: ${subject || 'বালাগাত ও মানতিক'}
+Topic: ${topic || 'عام'}
+Difficulty Level: ${difficulty || 'মাঝারি'}
+
+Requirements:
+- All questions, 4 options, and explanations MUST be written in clear Classical Arabic text.
+- Put the Arabic question text in BOTH 'question_ar' and 'question_bn'.
+- Exactly 4 options in Arabic.
+- Accurately mark correct_option index (0, 1, 2, or 3).
+- Write a detailed explanation in Arabic citing classical grammar or Fiqh books.
+`;
+    } else if (langMode === 'bn_only') {
+      promptInstruction = `
+Create ${reqCount} authentic multiple-choice questions (MCQs) in Bengali language.
+Target Exam Cadre / Post: ${cadreTier || 'প্রভাষক (আরবি)'}
+Subject: ${subject || 'বাংলা ও সাধারণ জ্ঞান'}
+Topic: ${topic || 'সাধারণ প্রস্তুতি'}
+Difficulty Level: ${difficulty || 'মাঝারি'}
+
+Requirements:
+- Question in Bengali (question_bn).
+- Exactly 4 options in Bengali.
+- Explanation in Bengali.
+`;
+    } else {
+      promptInstruction = `
+Create ${reqCount} authentic, high-quality multiple-choice questions (MCQs) for Tamreen Academy.
+Target Exam Cadre / Post: ${cadreTier || 'প্রভাষক (আরবি)'}
 Subject: ${subject || 'বালাগাত ও মানতিক'}
 Topic: ${topic || 'সাধারণ প্রস্তুতি'}
 Difficulty Level: ${difficulty || 'মাঝারি'}
 
 Requirements:
-- Each question must follow NTRCA / BCS / Madrasah Lecturer Board standards.
-- Include proper Arabic text (question_ar) and clear Bengali translation (question_bn).
+- Each question must follow NTRCA / BCS / Madrasah Board standards.
+- Include proper Classical Arabic text (question_ar) for the main passage/verse/hadith/grammatical term, and clear Bengali translation/question text (question_bn).
 - Exactly 4 options (Option 0, 1, 2, 3).
 - Accurately mark the correct option index (0, 1, 2, or 3).
-- Write an extensive, authoritative explanation (explanation) in Bengali citing classical Arabic grammar, Balaghat (علم المعاني والبيان), Fiqh, Hadith rules, or Literature references.
-    `;
+- Write an extensive explanation in Bengali citing classical Arabic grammar, Balaghat, Fiqh, or Hadith references.
+`;
+    }
 
     const response = await ai.models.generateContent({
       model: 'gemini-3.6-flash',
-      contents: prompt,
+      contents: promptInstruction,
       config: {
-        systemInstruction: 'You are an elite NTRCA Arabic Cadre Exam Question Setter with deep knowledge of Classical Arabic Literature, Quranic Tajweed, Hadith terminology, Fiqh, Balaghat, Mantiq, and General Knowledge.',
+        systemInstruction: 'You are an elite NTRCA Arabic Cadre & Madrasah Exam Question Setter with deep knowledge of Classical Arabic Literature, Quranic Tajweed, Hadith terminology, Fiqh, Balaghat, Mantiq, and General Knowledge.',
         responseMimeType: 'application/json',
         responseSchema: {
           type: Type.OBJECT,
@@ -261,16 +294,16 @@ Requirements:
     console.warn('API /api/ai/generate-questions Gemini call failed, returning structured fallback:', err?.message || err);
     // Return structured fallback questions for topic
     const fallbackList = Array.from({ length: reqCount }).map((_, idx) => ({
-      question_bn: `${subject || 'বালাগাত'} - ${topic || 'সাধারণ'} বিষয়ভিত্তিক প্রশ্ন ${idx + 1}`,
+      question_bn: langMode === 'ar_only' ? `سؤال في ${topic || subject || 'المادة'} رقم ${idx + 1}` : `${subject || 'বালাগাত'} - ${topic || 'সাধারণ'} বিষয়ভিত্তিক প্রশ্ন ${idx + 1}`,
       question_ar: 'ما هو الحكم الشرعي والتعريف الدقيق في هذه المسألة؟',
       options: [
-        'ক. প্রাথমিক ও সঠিক উত্তর নির্দেশক',
-        'খ. বিকল্প দ্বিতীয় অপশন বিবরণ',
-        'গ. সাধারণ বিশ্লেষণাত্মক পছন্দ',
-        'ঘ. প্রাসঙ্গিক ব্যাকরণগত উত্তর'
+        langMode === 'ar_only' ? 'أ. الخيار الأول الصحيح' : 'ক. প্রাথমিক ও সঠিক উত্তর নির্দেশক',
+        langMode === 'ar_only' ? 'ب. الخيار الثاني' : 'খ. বিকল্প দ্বিতীয় অপশন বিবরণ',
+        langMode === 'ar_only' ? 'ج. الخيار الثالث' : 'গ. সাধারণ বিশ্লেষণাত্মক পছন্দ',
+        langMode === 'ar_only' ? 'د. الخيار الرابع' : 'ঘ. প্রাসঙ্গিক ব্যাকরণগত উত্তর'
       ],
       correct_option: 0,
-      explanation: `${topic || 'উল্লিখিত বিষয়'} এর উপর বিস্তারিত বিশ্লেষণ ও বইয়ের রেফারেন্স পৃষ্ঠা।`,
+      explanation: langMode === 'ar_only' ? 'الشرح بالتفصيل والمراجع المعتمدة.' : `${topic || 'উল্লিখিত বিষয়'} এর উপর বিস্তারিত বিশ্লেষণ ও বইয়ের রেফারেন্স পৃষ্ঠা।`,
       topic: topic || 'সাধারণ প্রস্তুতি',
       difficulty: difficulty || 'মাঝারি'
     }));

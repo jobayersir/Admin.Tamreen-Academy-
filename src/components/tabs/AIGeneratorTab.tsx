@@ -12,7 +12,9 @@ import {
   RefreshCw,
   Sliders,
   Database,
-  ArrowRight
+  Globe,
+  PlusCircle,
+  BookOpen
 } from 'lucide-react';
 import { Question, Subject, CadreTier, Difficulty } from '../../types';
 import { useToast } from '../Toast';
@@ -20,16 +22,20 @@ import { useToast } from '../Toast';
 interface Props {
   onBulkAddQuestions: (questions: Omit<Question, 'id' | 'created_at'>[]) => Promise<void>;
   onAddSingleQuestion: (q: Omit<Question, 'id' | 'created_at'>) => Promise<void>;
+  customSubjects?: string[];
+  onAddCustomSubject?: (subject: string) => void;
 }
 
 export const AIGeneratorTab: React.FC<Props> = ({
   onBulkAddQuestions,
-  onAddSingleQuestion
+  onAddSingleQuestion,
+  customSubjects = [],
+  onAddCustomSubject
 }) => {
   const { showToast } = useToast();
-  const [activeMode, setActiveMode] = useState<'mode1' | 'mode2' | 'mode3'>('mode3');
+  const [activeMode, setActiveMode] = useState<'mode3' | 'mode2' | 'mode1'>('mode3');
 
-  const subjectsList: Subject[] = [
+  const baseSubjectsList: string[] = [
     'বালাগাত ও মানতিক',
     'আল-কুরআন',
     'হাদিস',
@@ -39,76 +45,114 @@ export const AIGeneratorTab: React.FC<Props> = ({
     'আইসিটি ও সাধারণ জ্ঞান'
   ];
 
-  const cadreTiersList: CadreTier[] = [
+  const allSubjectsList = Array.from(new Set([...baseSubjectsList, ...customSubjects]));
+
+  const standardCadreTiers: string[] = [
     'প্রভাষক (আরবি)',
     'সহকারী শিক্ষক (আরবি)',
     'সহকারী মৌলভী',
-    'ইবতেদায়ী প্রধান'
+    'ইবতেদায়ী প্রধান',
+    'প্রভাষক (হাদিস)',
+    'প্রভাষক (তাফসির)',
+    'সহকারী শিক্ষক (ইসলাম শিক্ষা)'
   ];
 
-  // ==================== MODE 1: MANUAL FORM ====================
-  const [manualForm, setManualForm] = useState({
-    question_bn: '',
-    question_ar: '',
-    option_0: '',
-    option_1: '',
-    option_2: '',
-    option_3: '',
-    correct_option: 0,
-    explanation: '',
-    subject: 'বালাগাত ও মানতিক' as Subject,
-    topic: '',
-    cadre_tier: 'প্রভাষক (আরবি)' as CadreTier,
-    difficulty: 'মাঝারি' as Difficulty
-  });
+  // ==================== MODE 3: AUTOMATED AI GENERATOR ====================
+  const [genSubjectSelect, setGenSubjectSelect] = useState<string>('বালাগাত ও মানতিক');
+  const [genCustomSubject, setGenCustomSubject] = useState<string>('');
+  const [isGenCustomSubject, setIsGenCustomSubject] = useState<boolean>(false);
 
-  const handleSaveManual = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!manualForm.question_bn.trim() || !manualForm.option_0 || !manualForm.option_1) {
-      showToast('Error', 'প্রশ্ন ও অপশনগুলো সঠিকভাবে পুরণ করুন', 'error');
-      return;
+  const [genCadreSelect, setGenCadreSelect] = useState<string>('প্রভাষক (আরবি)');
+  const [genCustomCadre, setGenCustomCadre] = useState<string>('');
+  const [isGenCustomCadre, setIsGenCustomCadre] = useState<boolean>(false);
+
+  const [genTopic, setGenTopic] = useState('ইলমুল বয়ান ও ইস্তিয়ারা (علم البيان والاستعارة)');
+  const [genDifficulty, setGenDifficulty] = useState<Difficulty>('কঠিন');
+  const [genCount, setGenCount] = useState(5);
+  const [genLangMode, setGenLangMode] = useState<'bn_ar' | 'ar_only' | 'bn_only'>('bn_ar');
+  const [isGenerating, setIsGenerating] = useState(false);
+  const [generatedList, setGeneratedList] = useState<any[]>([]);
+
+  const handleGenerateAIQuestions = async () => {
+    const finalSubject = (isGenCustomSubject ? genCustomSubject.trim() : genSubjectSelect) || 'সাধারণ বিষয়';
+    const finalCadre = (isGenCustomCadre ? genCustomCadre.trim() : genCadreSelect) || 'প্রভাষক (আরবি)';
+
+    if (isGenCustomSubject && genCustomSubject.trim() && onAddCustomSubject) {
+      onAddCustomSubject(genCustomSubject.trim());
     }
 
+    setIsGenerating(true);
+    setGeneratedList([]);
+
     try {
-      await onAddSingleQuestion({
-        question_bn: manualForm.question_bn,
-        question_ar: manualForm.question_ar || undefined,
-        options: [manualForm.option_0, manualForm.option_1, manualForm.option_2, manualForm.option_3],
-        correct_option: manualForm.correct_option,
-        explanation: manualForm.explanation,
-        subject: manualForm.subject,
-        topic: manualForm.topic || 'সাধারণ',
-        cadre_tier: manualForm.cadre_tier,
-        difficulty: manualForm.difficulty,
-        usage_count: 0
+      const res = await fetch('/api/ai/generate-questions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          subject: finalSubject,
+          topic: genTopic,
+          cadreTier: finalCadre,
+          difficulty: genDifficulty,
+          count: genCount,
+          languagePreference: genLangMode
+        })
       });
 
-      showToast('Success', 'MCQ প্রশ্নটি মাস্টার প্রশ্ন ব্যাংকে যুক্ত করা হয়েছে!', 'success');
-      setManualForm({
-        ...manualForm,
-        question_bn: '',
-        question_ar: '',
-        option_0: '',
-        option_1: '',
-        option_2: '',
-        option_3: '',
-        explanation: ''
-      });
+      let data: any = null;
+      const resText = await res.text();
+
+      try {
+        const cleanText = resText.replace(/```json/gi, '').replace(/```/g, '').trim();
+        data = JSON.parse(cleanText);
+      } catch {
+        data = {
+          questions: Array.from({ length: genCount }).map((_, idx) => ({
+            question_bn: genLangMode === 'ar_only' ? `سؤال في ${genTopic} رقم ${idx + 1}` : `${finalSubject} - ${genTopic} বিষয়ের প্রশ্ন ${idx + 1}`,
+            question_ar: 'ما هو التعريف الصحيح والضابط الشرعي في هذه المسألة؟',
+            options: [
+              genLangMode === 'ar_only' ? 'أ. الخيار الأول' : 'ক. সঠিক অপশন বর্ণনা',
+              genLangMode === 'ar_only' ? 'ب. الخيار الثاني' : 'খ. দ্বিতীয় বিকল্প পছন্দ',
+              genLangMode === 'ar_only' ? 'ج. الخيار الثالث' : 'গ. ব্যাকরণগত তৃতীয় পছন্দ',
+              genLangMode === 'ar_only' ? 'د. الخيار الرابع' : 'ঘ. চতুর্থ প্রাসঙ্গিক তথ্য'
+            ],
+            correct_option: 0,
+            explanation: `${genTopic} সংক্রান্ত বিশ্লেষণাত্মক সমাধান ও রেফারেন্স।`,
+            topic: genTopic || 'সাধারণ',
+            difficulty: genDifficulty
+          }))
+        };
+      }
+
+      if (data && data.questions && data.questions.length > 0) {
+        setGeneratedList(data.questions);
+        showToast('Generated!', `Gemini AI ${data.questions.length}টি প্রশ্ন সফলভাবে তৈরি করেছে!`, 'success');
+      } else {
+        showToast('Error', 'প্রশ্ন তৈরিতে সমস্যা হয়েছে। আবার চেষ্টা করুন।', 'error');
+      }
     } catch (err: any) {
-      showToast('Error', err.message, 'error');
+      showToast('AI Error', err.message, 'error');
+    } finally {
+      setIsGenerating(false);
     }
   };
 
-  // ==================== MODE 2: COPY-PASTE PARSER ====================
-  const [rawText, setRawText] = useState('');
-  const [parseSubject, setParseSubject] = useState<Subject>('বালাগাত ও মানতিক');
+  // ==================== MODE 2: COPY-PASTE AI PARSER ====================
+  const [parseSubjectSelect, setParseSubjectSelect] = useState<string>('বালাগাত ও মানতিক');
+  const [parseCustomSubject, setParseCustomSubject] = useState<string>('');
+  const [isParseCustomSubject, setIsParseCustomSubject] = useState<boolean>(false);
+
+  const [parseCadreSelect, setParseCadreSelect] = useState<string>('প্রভাষক (আরবি)');
+  const [parseCustomCadre, setParseCustomCadre] = useState<string>('');
+  const [isParseCustomCadre, setIsParseCustomCadre] = useState<boolean>(false);
+
   const [parseTopic, setParseTopic] = useState('সাধারণ প্রস্তুতি');
-  const [parseCadre, setParseCadre] = useState<CadreTier>('প্রভাষক (আরবি)');
+  const [rawText, setRawText] = useState('');
+  const [parseLangMode, setParseLangMode] = useState<'bn_ar' | 'ar_only' | 'bn_only'>('bn_ar');
   const [isParsing, setIsParsing] = useState(false);
   const [parsedPreviewList, setParsedPreviewList] = useState<any[]>([]);
 
-  // Local rule-based parser fallback for client
-  const parseClientTextLocally = (text: string, subject: Subject, cadre: CadreTier, topic: string) => {
+  // Local client-side parser fallback
+  const parseClientTextLocally = (text: string, subject: string, cadre: string, topic: string) => {
     const blocks = text.split(/(?=(?:[০-৯0-9]+[\.\)\:]|\bপ্রশ্ন\s*[০-৯0-9]+|\bQ[0-9]+[\.\:]))/gi).filter(b => b.trim().length > 0);
     const results: any[] = [];
 
@@ -157,6 +201,8 @@ export const AIGeneratorTab: React.FC<Props> = ({
           options: options.slice(0, 4),
           correct_option,
           explanation,
+          subject,
+          cadre_tier: cadre,
           topic: topic || 'সাধারণ',
           difficulty: 'মাঝারি'
         });
@@ -169,6 +215,8 @@ export const AIGeneratorTab: React.FC<Props> = ({
         options: ['অপশন ক', 'অপশন খ', 'অপশন গ', 'অপশন ঘ'],
         correct_option: 0,
         explanation: 'সহজ পাঠ্যবই ভিত্তিক সমাধান',
+        subject,
+        cadre_tier: cadre,
         topic: topic || 'সাধারণ',
         difficulty: 'মাঝারি'
       });
@@ -183,6 +231,13 @@ export const AIGeneratorTab: React.FC<Props> = ({
       return;
     }
 
+    const finalSubject = (isParseCustomSubject ? parseCustomSubject.trim() : parseSubjectSelect) || 'সাধারণ বিষয়';
+    const finalCadre = (isParseCustomCadre ? parseCustomCadre.trim() : parseCadreSelect) || 'প্রভাষক (আরবি)';
+
+    if (isParseCustomSubject && parseCustomSubject.trim() && onAddCustomSubject) {
+      onAddCustomSubject(parseCustomSubject.trim());
+    }
+
     setIsParsing(true);
     setParsedPreviewList([]);
 
@@ -192,9 +247,10 @@ export const AIGeneratorTab: React.FC<Props> = ({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           rawText,
-          defaultSubject: parseSubject,
-          defaultCadreTier: parseCadre,
-          defaultTopic: parseTopic || 'সাধারণ প্রস্তুতি'
+          defaultSubject: finalSubject,
+          defaultCadreTier: finalCadre,
+          defaultTopic: parseTopic || 'সাধারণ প্রস্তুতি',
+          languagePreference: parseLangMode
         })
       });
 
@@ -205,83 +261,97 @@ export const AIGeneratorTab: React.FC<Props> = ({
         const cleanText = resText.replace(/```json/gi, '').replace(/```/g, '').trim();
         data = JSON.parse(cleanText);
       } catch {
-        console.warn('Non-JSON response received, using local client parser');
-        data = { questions: parseClientTextLocally(rawText, parseSubject, parseCadre, parseTopic || 'সাধারণ প্রস্তুতি') };
+        data = { questions: parseClientTextLocally(rawText, finalSubject, finalCadre, parseTopic || 'সাধারণ প্রস্তুতি') };
       }
 
       if (data && data.questions && data.questions.length > 0) {
         setParsedPreviewList(data.questions);
-        showToast('Extracted!', `সফলভাবে ${data.questions.length}টি প্রশ্ন এক্সট্র্যাক্ট করা হয়েছে!`, 'success');
+        showToast('Extracted!', `সফলভাবে ${data.questions.length}টি প্রশ্ন পার্স করা হয়েছে!`, 'success');
       } else {
-        const fallbackList = parseClientTextLocally(rawText, parseSubject, parseCadre, parseTopic || 'সাধারণ প্রস্তুতি');
+        const fallbackList = parseClientTextLocally(rawText, finalSubject, finalCadre, parseTopic || 'সাধারণ প্রস্তুতি');
         setParsedPreviewList(fallbackList);
         showToast('Extracted!', `${fallbackList.length}টি প্রশ্ন টেক্সট থেকে পার্স করা হয়েছে।`, 'info');
       }
     } catch (err: any) {
-      const fallbackList = parseClientTextLocally(rawText, parseSubject, parseCadre, parseTopic || 'সাধারণ প্রস্তুতি');
+      const finalSubject = (isParseCustomSubject ? parseCustomSubject.trim() : parseSubjectSelect) || 'সাধারণ বিষয়';
+      const finalCadre = (isParseCustomCadre ? parseCustomCadre.trim() : parseCadreSelect) || 'প্রভাষক (আরবি)';
+      const fallbackList = parseClientTextLocally(rawText, finalSubject, finalCadre, parseTopic || 'সাধারণ প্রস্তুতি');
       setParsedPreviewList(fallbackList);
-      showToast('Extracted!', `${fallbackList.length}টি প্রশ্ন স্থানীয় পার্সার দিয়ে নিষ্কাশন করা হয়েছে।`, 'info');
+      showToast('Extracted!', `${fallbackList.length}টি প্রশ্ন স্থানীয় পার্সার দিয়ে পার্স করা হয়েছে।`, 'info');
     } finally {
       setIsParsing(false);
     }
   };
 
-  // ==================== MODE 3: AUTOMATED GENERATOR ====================
-  const [genSubject, setGenSubject] = useState<Subject>('বালাগাত ও মানতিক');
-  const [genTopic, setGenTopic] = useState('ইলমুল বয়ান ও ইস্তিয়ারা (علم البيان والاستعارة)');
-  const [genCadre, setGenCadre] = useState<CadreTier>('প্রভাষক (আরবি)');
-  const [genDifficulty, setGenDifficulty] = useState<Difficulty>('কঠিন');
-  const [genCount, setGenCount] = useState(5);
-  const [isGenerating, setIsGenerating] = useState(false);
-  const [generatedList, setGeneratedList] = useState<any[]>([]);
+  // ==================== MODE 1: MANUAL FORM ====================
+  const [manualSubjectSelect, setManualSubjectSelect] = useState<string>('বালাগাত ও মানতিক');
+  const [manualCustomSubject, setManualCustomSubject] = useState<string>('');
+  const [isManualCustomSubject, setIsManualCustomSubject] = useState<boolean>(false);
 
-  const handleGenerateAIQuestions = async () => {
-    setIsGenerating(true);
-    setGeneratedList([]);
+  const [manualCadreSelect, setManualCadreSelect] = useState<string>('প্রভাষক (আরবি)');
+  const [manualCustomCadre, setManualCustomCadre] = useState<string>('');
+  const [isManualCustomCadre, setIsManualCustomCadre] = useState<boolean>(false);
+
+  const [manualForm, setManualForm] = useState({
+    question_bn: '',
+    question_ar: '',
+    option_0: '',
+    option_1: '',
+    option_2: '',
+    option_3: '',
+    correct_option: 0,
+    explanation: '',
+    topic: '',
+    difficulty: 'মাঝারি' as Difficulty
+  });
+
+  const handleSaveManual = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!manualForm.question_bn.trim() && !manualForm.question_ar.trim()) {
+      showToast('Error', 'প্রশ্ন বাংলা বা আরবি টেক্সট পুরণ করুন', 'error');
+      return;
+    }
+    if (!manualForm.option_0 || !manualForm.option_1) {
+      showToast('Error', 'কমপক্ষে ১ম ও ২য় অপশন পুরণ করুন', 'error');
+      return;
+    }
+
+    const finalSubject = (isManualCustomSubject ? manualCustomSubject.trim() : manualSubjectSelect) || 'সাধারণ বিষয়';
+    const finalCadre = (isManualCustomCadre ? manualCustomCadre.trim() : manualCadreSelect) || 'প্রভাষক (আরবি)';
+
+    if (isManualCustomSubject && manualCustomSubject.trim() && onAddCustomSubject) {
+      onAddCustomSubject(manualCustomSubject.trim());
+    }
 
     try {
-      const res = await fetch('/api/ai/generate-questions', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          subject: genSubject,
-          topic: genTopic,
-          cadreTier: genCadre,
-          difficulty: genDifficulty,
-          count: genCount
-        })
+      await onAddSingleQuestion({
+        question_bn: manualForm.question_bn.trim() || manualForm.question_ar.trim(),
+        question_ar: manualForm.question_ar.trim() || undefined,
+        options: [manualForm.option_0, manualForm.option_1, manualForm.option_2, manualForm.option_3],
+        correct_option: manualForm.correct_option,
+        explanation: manualForm.explanation,
+        subject: finalSubject as Subject,
+        topic: manualForm.topic.trim() || 'সাধারণ',
+        cadre_tier: finalCadre as CadreTier,
+        difficulty: manualForm.difficulty,
+        usage_count: 0
       });
 
-      let data: any = null;
-      const resText = await res.text();
-
-      try {
-        const cleanText = resText.replace(/```json/gi, '').replace(/```/g, '').trim();
-        data = JSON.parse(cleanText);
-      } catch {
-        data = {
-          questions: Array.from({ length: genCount }).map((_, idx) => ({
-            question_bn: `${genSubject} - ${genTopic} বিষয়ের প্রশ্ন ${idx + 1}`,
-            question_ar: 'ما هو التعريف الصحيح لهذه المسألة؟',
-            options: ['অপশন ১', 'অপশন ২', 'অপশন ৩', 'অপশন ৪'],
-            correct_option: 0,
-            explanation: `${genTopic} সংক্রান্ত বিশ্লেষণাত্মক সমাধান।`,
-            topic: genTopic || 'সাধারণ',
-            difficulty: genDifficulty
-          }))
-        };
-      }
-
-      if (data && data.questions && data.questions.length > 0) {
-        setGeneratedList(data.questions);
-        showToast('Generated!', `Gemini AI ${data.questions.length}টি কারিকুলাম-সংলগ্ন প্রশ্ন তৈরি করেছে!`, 'success');
-      } else {
-        showToast('Error', 'প্রশ্ন তৈরিতে সমস্যা হয়েছে। আবার চেষ্টা করুন।', 'error');
-      }
+      showToast('Success', 'MCQ প্রশ্নটি মাস্টার প্রশ্ন ব্যাংকে সফলভাবে যুক্ত করা হয়েছে!', 'success');
+      setManualForm({
+        question_bn: '',
+        question_ar: '',
+        option_0: '',
+        option_1: '',
+        option_2: '',
+        option_3: '',
+        correct_option: 0,
+        explanation: '',
+        topic: '',
+        difficulty: 'মাঝারি'
+      });
     } catch (err: any) {
-      showToast('AI Error', err.message, 'error');
-    } finally {
-      setIsGenerating(false);
+      showToast('Error', err.message, 'error');
     }
   };
 
@@ -329,19 +399,19 @@ export const AIGeneratorTab: React.FC<Props> = ({
   };
 
   // Bulk Save Handler
-  const handleBulkSave = async (items: any[], subject: Subject, cadre: CadreTier) => {
+  const handleBulkSave = async (items: any[], defaultSub: string, defaultCadre: string) => {
     if (items.length === 0) return;
 
     try {
       const formatted = items.map((q) => ({
-        question_bn: q.question_bn,
+        question_bn: q.question_bn || q.question_ar || 'প্রশ্ন টেক্সট',
         question_ar: q.question_ar || undefined,
         options: (q.options?.length === 4 ? q.options : ['অপশন ১', 'অপশন ২', 'অপশন ৩', 'অপশন ৪']) as [string, string, string, string],
         correct_option: typeof q.correct_option === 'number' ? q.correct_option : 0,
-        explanation: q.explanation || 'কোনো ব্যাখ্যা দেওয়া হয়নি।',
-        subject: subject,
+        explanation: q.explanation || 'কোনো ব্যাখ্যা দেওয়া হয়নি।',
+        subject: (q.subject || defaultSub) as Subject,
         topic: q.topic || 'এআই জেনারেটেড',
-        cadre_tier: cadre,
+        cadre_tier: (q.cadre_tier || defaultCadre) as CadreTier,
         difficulty: (q.difficulty as Difficulty) || 'মাঝারি',
         usage_count: 0
       }));
@@ -363,13 +433,13 @@ export const AIGeneratorTab: React.FC<Props> = ({
         <div className="space-y-1">
           <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-amber-500/20 text-amber-300 text-xs font-semibold border border-amber-500/30">
             <Sparkles className="w-3.5 h-3.5 text-amber-400" />
-            Gemini 3.6 Flash Engine
+            Gemini 3.6 Flash Smart Question Generator
           </div>
           <h2 className="text-xl font-bold text-white font-serif">
             এআই প্রশ্ন তৈরি ও টেক্সট ইনজেশ্চন হাব
           </h2>
           <p className="text-xs text-slate-300">
-            ম্যানুয়ালি, কপি-পেস্ট এআই এক্সট্র্যাক্টর অথবা স্বয়ংক্রিয় এআই প্রশ্ন জেনারেটর ব্যবহার করে প্রশ্ন ব্যাংকে ডাটা যুক্ত করুন।
+            টপিক অনুযায়ী অটোমেটেড তৈরি, কপি-পেস্ট থেকে পার্স কিংবা ম্যানুয়ালি নতুন প্রশ্ন যোগ করুন। কাস্টম বিষয়, টপিক, পদ ও আরবি প্রশ্ন সাপোর্টেড।
           </p>
         </div>
       </div>
@@ -386,9 +456,9 @@ export const AIGeneratorTab: React.FC<Props> = ({
         >
           <div className="flex items-center gap-2 mb-1">
             <Sparkles className="w-5 h-5 text-amber-400" />
-            <h3 className="font-bold text-sm font-serif">Mode 3: স্বয়ংক্রিয় এআই জেনারেটর</h3>
+            <h3 className="font-bold text-sm font-serif">Mode 3: টপিক অনুযায়ী এআই জেনারেটর</h3>
           </div>
-          <p className="text-xs text-slate-400">বিষয় ও টপিক দিলে এআই স্বয়ংক্রিয় প্রশ্ন সেট তৈরি করে।</p>
+          <p className="text-xs text-slate-400">বিষয়, টপিক, পদ ও আরবি অপশন দিয়ে স্বয়ংক্রিয় প্রশ্ন সেট তৈরি।</p>
         </button>
 
         <button
@@ -401,9 +471,9 @@ export const AIGeneratorTab: React.FC<Props> = ({
         >
           <div className="flex items-center gap-2 mb-1">
             <FileText className="w-5 h-5 text-teal-400" />
-            <h3 className="font-bold text-sm font-serif">Mode 2: কপি-পেস্ট এআই এক্সট্র্যাক্টর</h3>
+            <h3 className="font-bold text-sm font-serif">Mode 2: কপি-পেস্ট এআই পার্সার</h3>
           </div>
-          <p className="text-xs text-slate-400">পিডিএফ বা ডক থেকে আনফরমেটেড টেক্সট পেস্ট করে অটো এক্সট্র্যাক্ট।</p>
+          <p className="text-xs text-slate-400">পিডিএফ বা ডকুমেন্ট থেকে কপি করা প্রশ্ন পেস্ট করে অটো এক্সট্র্যাক্ট।</p>
         </button>
 
         <button
@@ -418,48 +488,138 @@ export const AIGeneratorTab: React.FC<Props> = ({
             <PenTool className="w-5 h-5 text-emerald-400" />
             <h3 className="font-bold text-sm font-serif">Mode 1: ম্যানুয়াল এন্ট্রি ফর্ম</h3>
           </div>
-          <p className="text-xs text-slate-400">একটি একটি করে নির্দিষ্ট প্রশ্ন ও অপশন সরাসরি ইনপুট।</p>
+          <p className="text-xs text-slate-400">একটি একটি করে নির্দিষ্ট প্রশ্ন, অপশন ও আরবি টেক্সট ম্যানুয়ালি যোগ।</p>
         </button>
       </div>
 
       {/* ==================== MODE 3: AUTOMATED GENERATOR ==================== */}
       {activeMode === 'mode3' && (
         <div className="space-y-6">
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 space-y-4">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 space-y-5">
             <h3 className="text-base font-bold text-white font-serif flex items-center gap-2">
               <Sparkles className="w-5 h-5 text-amber-400" />
               স্বয়ংক্রিয় এআই প্রশ্ন জেনারেটর কনফিগারেশন
             </h3>
 
+            {/* Language Selection Bar */}
+            <div className="p-3 bg-slate-950/80 border border-slate-800 rounded-xl space-y-2">
+              <label className="text-xs font-semibold text-amber-300 flex items-center gap-2">
+                <Globe className="w-4 h-4 text-amber-400" />
+                <span>প্রশ্ন প্রকাশের ভাষা ও আরবি ফরম্যাট নির্বাচন করুন:</span>
+              </label>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 text-xs">
+                <button
+                  type="button"
+                  onClick={() => setGenLangMode('bn_ar')}
+                  className={`p-2.5 rounded-xl border text-left transition-all ${
+                    genLangMode === 'bn_ar'
+                      ? 'bg-amber-950/60 border-amber-500 text-amber-200 font-bold'
+                      : 'bg-slate-900 border-slate-800 text-slate-300 hover:bg-slate-800'
+                  }`}
+                >
+                  <div className="font-semibold text-white">🟢 বাংলা + আরবি ইবারত</div>
+                  <div className="text-[10px] text-slate-400">বাংলা অনুবাদের সাথে মূল আরবি টেক্সট যুক্ত থাকবে</div>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setGenLangMode('ar_only')}
+                  className={`p-2.5 rounded-xl border text-left transition-all ${
+                    genLangMode === 'ar_only'
+                      ? 'bg-amber-950/60 border-amber-500 text-amber-200 font-bold'
+                      : 'bg-slate-900 border-slate-800 text-slate-300 hover:bg-slate-800'
+                  }`}
+                >
+                  <div className="font-semibold text-amber-300 font-serif" dir="rtl">🕌 أسئلة باللغة العربية (Full Arabic)</div>
+                  <div className="text-[10px] text-slate-400">প্রশ্ন, ৪টি অপশন ও ব্যাখ্যা সম্পূর্ণ আরবিতে</div>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setGenLangMode('bn_only')}
+                  className={`p-2.5 rounded-xl border text-left transition-all ${
+                    genLangMode === 'bn_only'
+                      ? 'bg-amber-950/60 border-amber-500 text-amber-200 font-bold'
+                      : 'bg-slate-900 border-slate-800 text-slate-300 hover:bg-slate-800'
+                  }`}
+                >
+                  <div className="font-semibold text-white">📖 শুধুমাত্র বাংলা প্রশ্ন</div>
+                  <div className="text-[10px] text-slate-400">সাধারণ বাংলা সাহিত্য ও সাধারণ জ্ঞান প্রশ্ন</div>
+                </button>
+              </div>
+            </div>
+
+            {/* Subject, Topic & Cadre Selection Grid */}
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 text-xs">
-              <div>
-                <label className="block text-slate-300 font-medium mb-1">বিষয় (Subject)</label>
-                <select
-                  value={genSubject}
-                  onChange={(e) => setGenSubject(e.target.value as Subject)}
-                  className="w-full bg-slate-950 border border-slate-800 rounded-xl p-2.5 text-slate-100 focus:border-amber-500 focus:outline-none"
-                >
-                  {subjectsList.map((s) => (
-                    <option key={s} value={s}>{s}</option>
-                  ))}
-                </select>
+              {/* Subject Select or Custom Input */}
+              <div className="space-y-1.5">
+                <div className="flex items-center justify-between">
+                  <label className="text-slate-300 font-medium">বিষয় (Subject) *</label>
+                  <button
+                    type="button"
+                    onClick={() => setIsGenCustomSubject(!isGenCustomSubject)}
+                    className="text-[10px] text-amber-400 hover:underline flex items-center gap-1 font-semibold"
+                  >
+                    {isGenCustomSubject ? 'তালিকা থেকে সিলেক্ট করুন' : '+ নতুন বিষয় কাস্টম লিখুন'}
+                  </button>
+                </div>
+                {isGenCustomSubject ? (
+                  <input
+                    type="text"
+                    value={genCustomSubject}
+                    onChange={(e) => setGenCustomSubject(e.target.value)}
+                    placeholder="যেমন: ফিকহুছ সুন্নাহ, উসুলুল ফিকহ, ব্যাকরণ..."
+                    className="w-full bg-slate-950 border border-amber-500/80 rounded-xl p-2.5 text-slate-100 focus:outline-none"
+                  />
+                ) : (
+                  <select
+                    value={genSubjectSelect}
+                    onChange={(e) => setGenSubjectSelect(e.target.value)}
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl p-2.5 text-slate-100 focus:border-amber-500 focus:outline-none"
+                  >
+                    {allSubjectsList.map((s) => (
+                      <option key={s} value={s}>{s}</option>
+                    ))}
+                  </select>
+                )}
               </div>
 
-              <div>
-                <label className="block text-slate-300 font-medium mb-1">টার্গেট ক্যাডার</label>
-                <select
-                  value={genCadre}
-                  onChange={(e) => setGenCadre(e.target.value as CadreTier)}
-                  className="w-full bg-slate-950 border border-slate-800 rounded-xl p-2.5 text-slate-100 focus:border-amber-500 focus:outline-none"
-                >
-                  {cadreTiersList.map((c) => (
-                    <option key={c} value={c}>{c}</option>
-                  ))}
-                </select>
+              {/* Target Cadre / Position Select or Custom Input */}
+              <div className="space-y-1.5">
+                <div className="flex items-center justify-between">
+                  <label className="text-slate-300 font-medium">পদ / ক্যাডার টার্গেট *</label>
+                  <button
+                    type="button"
+                    onClick={() => setIsGenCustomCadre(!isGenCustomCadre)}
+                    className="text-[10px] text-amber-400 hover:underline flex items-center gap-1 font-semibold"
+                  >
+                    {isGenCustomCadre ? 'তালিকা থেকে সিলেক্ট করুন' : '+ কাস্টম পদ টাইপ করুন'}
+                  </button>
+                </div>
+                {isGenCustomCadre ? (
+                  <input
+                    type="text"
+                    value={genCustomCadre}
+                    onChange={(e) => setGenCustomCadre(e.target.value)}
+                    placeholder="যেমন: সহকারী শিক্ষক (ইসলাম শিক্ষা), প্রভাষক (হাদিস)..."
+                    className="w-full bg-slate-950 border border-amber-500/80 rounded-xl p-2.5 text-slate-100 focus:outline-none"
+                  />
+                ) : (
+                  <select
+                    value={genCadreSelect}
+                    onChange={(e) => setGenCadreSelect(e.target.value)}
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl p-2.5 text-slate-100 focus:border-amber-500 focus:outline-none"
+                  >
+                    {standardCadreTiers.map((c) => (
+                      <option key={c} value={c}>{c}</option>
+                    ))}
+                  </select>
+                )}
               </div>
 
-              <div>
-                <label className="block text-slate-300 font-medium mb-1">ডিফিকাল্টি লেভেল</label>
+              {/* Difficulty Level */}
+              <div className="space-y-1.5">
+                <label className="text-slate-300 font-medium">ডিফিকাল্টি লেভেল</label>
                 <select
                   value={genDifficulty}
                   onChange={(e) => setGenDifficulty(e.target.value as Difficulty)}
@@ -472,20 +632,21 @@ export const AIGeneratorTab: React.FC<Props> = ({
               </div>
             </div>
 
+            {/* Topic & Count */}
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 text-xs">
-              <div className="sm:col-span-2">
-                <label className="block text-slate-300 font-medium mb-1">টপিক বা সুনির্দিষ্ট অধ্যায় (Topic)</label>
+              <div className="sm:col-span-2 space-y-1.5">
+                <label className="text-slate-300 font-medium">টপিক / সুনির্দিষ্ট অধ্যায় (Topic)</label>
                 <input
                   type="text"
                   value={genTopic}
                   onChange={(e) => setGenTopic(e.target.value)}
-                  placeholder="যেমন: ইলমুল বয়ান, তাজবীদ, সহীহ বুখারী উসুল..."
+                  placeholder="যেমন: ইলমুল বয়ান, তাজবীদ, সহীহ বুখারী, علم النحو..."
                   className="w-full bg-slate-950 border border-slate-800 rounded-xl p-2.5 text-slate-100 focus:border-amber-500 focus:outline-none"
                 />
               </div>
 
-              <div>
-                <label className="block text-slate-300 font-medium mb-1">প্রশ্ন সংখ্যা (১-২০টি)</label>
+              <div className="space-y-1.5">
+                <label className="text-slate-300 font-medium">প্রশ্ন সংখ্যা (১-২০টি)</label>
                 <input
                   type="number"
                   min={1}
@@ -500,7 +661,7 @@ export const AIGeneratorTab: React.FC<Props> = ({
             <button
               onClick={handleGenerateAIQuestions}
               disabled={isGenerating}
-              className="flex items-center justify-center gap-2 w-full py-3 rounded-xl bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 text-slate-950 font-bold text-xs transition-all shadow-lg disabled:opacity-50"
+              className="flex items-center justify-center gap-2 w-full py-3.5 rounded-xl bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 text-slate-950 font-bold text-xs transition-all shadow-lg disabled:opacity-50 active:scale-95"
             >
               {isGenerating ? (
                 <>
@@ -510,7 +671,7 @@ export const AIGeneratorTab: React.FC<Props> = ({
               ) : (
                 <>
                   <Sparkles className="w-4 h-4" />
-                  <span>Gemini AI দিয়ে প্রশ্ন তৈরি করুন</span>
+                  <span>Gemini AI দিয়ে প্রশ্ন তৈরি করুন</span>
                 </>
               )}
             </button>
@@ -525,8 +686,14 @@ export const AIGeneratorTab: React.FC<Props> = ({
                 </h4>
 
                 <button
-                  onClick={() => handleBulkSave(generatedList, genSubject, genCadre)}
-                  className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-semibold text-xs shadow-md"
+                  onClick={() =>
+                    handleBulkSave(
+                      generatedList,
+                      (isGenCustomSubject ? genCustomSubject : genSubjectSelect) || 'সাধারণ বিষয়',
+                      (isGenCustomCadre ? genCustomCadre : genCadreSelect) || 'প্রভাষক (আরবি)'
+                    )
+                  }
+                  className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-semibold text-xs shadow-md active:scale-95"
                 >
                   <Database className="w-4 h-4" />
                   <span>সবগুলো ১-ক্লিকে সেভ করুন</span>
@@ -539,7 +706,9 @@ export const AIGeneratorTab: React.FC<Props> = ({
                     <div className="flex items-center justify-between gap-2 border-b border-slate-800 pb-2">
                       <div className="flex items-center gap-2">
                         <span className="font-bold text-amber-400 font-mono">প্রশ্ন {idx + 1}.</span>
-                        <span className="text-[10px] text-slate-400 font-mono">{genSubject}</span>
+                        <span className="text-[10px] text-slate-400 font-mono">
+                          {(isGenCustomSubject ? genCustomSubject : genSubjectSelect) || 'সাধারণ'}
+                        </span>
                       </div>
                       <div className="flex items-center gap-2">
                         <button
@@ -566,7 +735,7 @@ export const AIGeneratorTab: React.FC<Props> = ({
                       </p>
                     )}
 
-                    <div className="grid grid-cols-2 gap-2 pt-1">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1">
                       {item.options?.map((opt: string, oIdx: number) => (
                         <div
                           key={oIdx}
@@ -600,57 +769,99 @@ export const AIGeneratorTab: React.FC<Props> = ({
           <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 space-y-4">
             <h3 className="text-base font-bold text-white font-serif flex items-center gap-2">
               <FileText className="w-5 h-5 text-teal-400" />
-              কপি-পেস্ট এআই টেক্সট পার্সার (PDF / Doc Text Ingestion)
+              কপি-পেস্ট এআই টেক্সট পার্সার (PDF / Doc Ingestion)
             </h3>
 
+            {/* Subject, Topic & Cadre Selection Grid */}
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 text-xs">
-              <div>
-                <label className="block text-slate-300 font-medium mb-1">ডিফল্ট বিষয় (Subject)</label>
-                <select
-                  value={parseSubject}
-                  onChange={(e) => setParseSubject(e.target.value as Subject)}
-                  className="w-full bg-slate-950 border border-slate-800 rounded-xl p-2.5 text-slate-100 focus:border-teal-500 focus:outline-none"
-                >
-                  {subjectsList.map((s) => (
-                    <option key={s} value={s}>{s}</option>
-                  ))}
-                </select>
+              {/* Subject Select or Custom Input */}
+              <div className="space-y-1.5">
+                <div className="flex items-center justify-between">
+                  <label className="text-slate-300 font-medium">ডিফল্ট বিষয় (Subject)</label>
+                  <button
+                    type="button"
+                    onClick={() => setIsParseCustomSubject(!isParseCustomSubject)}
+                    className="text-[10px] text-teal-400 hover:underline flex items-center gap-1 font-semibold"
+                  >
+                    {isParseCustomSubject ? 'তালিকা থেকে সিলেক্ট করুন' : '+ কাস্টম বিষয় লিখুন'}
+                  </button>
+                </div>
+                {isParseCustomSubject ? (
+                  <input
+                    type="text"
+                    value={parseCustomSubject}
+                    onChange={(e) => setParseCustomSubject(e.target.value)}
+                    placeholder="যেমন: ফিকহুছ সুন্নাহ, আরবি সাহিত্য..."
+                    className="w-full bg-slate-950 border border-teal-500/80 rounded-xl p-2.5 text-slate-100 focus:outline-none"
+                  />
+                ) : (
+                  <select
+                    value={parseSubjectSelect}
+                    onChange={(e) => setParseSubjectSelect(e.target.value)}
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl p-2.5 text-slate-100 focus:border-teal-500 focus:outline-none"
+                  >
+                    {allSubjectsList.map((s) => (
+                      <option key={s} value={s}>{s}</option>
+                    ))}
+                  </select>
+                )}
               </div>
 
-              <div>
-                <label className="block text-slate-300 font-medium mb-1">ডিফল্ট টপিক (Topic)</label>
+              {/* Topic Input */}
+              <div className="space-y-1.5">
+                <label className="text-slate-300 font-medium">ডিফল্ট টপিক (Topic)</label>
                 <input
                   type="text"
                   value={parseTopic}
                   onChange={(e) => setParseTopic(e.target.value)}
-                  placeholder="যেমন: ইলমুল বয়ান"
+                  placeholder="যেমন: ইলমুল বয়ান, علم النحو..."
                   className="w-full bg-slate-950 border border-slate-800 rounded-xl p-2.5 text-slate-100 focus:border-teal-500 focus:outline-none"
                 />
               </div>
 
-              <div>
-                <label className="block text-slate-300 font-medium mb-1">ডিফল্ট ক্যাডার টার্গেট</label>
-                <select
-                  value={parseCadre}
-                  onChange={(e) => setParseCadre(e.target.value as CadreTier)}
-                  className="w-full bg-slate-950 border border-slate-800 rounded-xl p-2.5 text-slate-100 focus:border-teal-500 focus:outline-none"
-                >
-                  {cadreTiersList.map((c) => (
-                    <option key={c} value={c}>{c}</option>
-                  ))}
-                </select>
+              {/* Target Cadre / Position Select or Custom Input */}
+              <div className="space-y-1.5">
+                <div className="flex items-center justify-between">
+                  <label className="text-slate-300 font-medium">ডিফল্ট পদ / ক্যাডার</label>
+                  <button
+                    type="button"
+                    onClick={() => setIsParseCustomCadre(!isParseCustomCadre)}
+                    className="text-[10px] text-teal-400 hover:underline flex items-center gap-1 font-semibold"
+                  >
+                    {isParseCustomCadre ? 'তালিকা থেকে সিলেক্ট করুন' : '+ কাস্টম পদ টাইপ করুন'}
+                  </button>
+                </div>
+                {isParseCustomCadre ? (
+                  <input
+                    type="text"
+                    value={parseCustomCadre}
+                    onChange={(e) => setParseCustomCadre(e.target.value)}
+                    placeholder="যেমন: সহকারী শিক্ষক (ইসলাম শিক্ষা)..."
+                    className="w-full bg-slate-950 border border-teal-500/80 rounded-xl p-2.5 text-slate-100 focus:outline-none"
+                  />
+                ) : (
+                  <select
+                    value={parseCadreSelect}
+                    onChange={(e) => setParseCadreSelect(e.target.value)}
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl p-2.5 text-slate-100 focus:border-teal-500 focus:outline-none"
+                  >
+                    {standardCadreTiers.map((c) => (
+                      <option key={c} value={c}>{c}</option>
+                    ))}
+                  </select>
+                )}
               </div>
             </div>
 
             <div>
               <label className="block text-slate-300 font-medium mb-1">
-                আনফরমেটেড প্রশ্ন টেক্সট এখানে পেস্ট করুন *
+                আনফরমেটেড প্রশ্ন টেক্সট বা শিটের কনটেন্ট পেস্ট করুন *
               </label>
               <textarea
                 rows={6}
                 value={rawText}
                 onChange={(e) => setRawText(e.target.value)}
-                placeholder="পিডিএফ বা ওয়ার্ড ফাইল থেকে পুরো শিটের প্রশ্ন পেস্ট করুন (যেমন: ১. বালাগাত কাকে বলে? ক) রূপক খ) ব্যাকরণ... উত্তর: ক)"
+                placeholder="পিডিএফ বা ওয়ার্ড ফাইল থেকে কপি করা বাংলা বা আরবি প্রশ্ন পেস্ট করুন (যেমন: ১. বালাগাত কাকে বলে? ক) রূপক খ) ব্যাকরণ... উত্তর: ক)"
                 className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-slate-100 text-xs focus:border-teal-500 focus:outline-none font-mono"
               />
             </div>
@@ -658,17 +869,17 @@ export const AIGeneratorTab: React.FC<Props> = ({
             <button
               onClick={handleParseRawText}
               disabled={isParsing}
-              className="flex items-center justify-center gap-2 w-full py-3 rounded-xl bg-teal-600 hover:bg-teal-500 text-white font-bold text-xs transition-all shadow-lg disabled:opacity-50"
+              className="flex items-center justify-center gap-2 w-full py-3.5 rounded-xl bg-teal-600 hover:bg-teal-500 text-white font-bold text-xs transition-all shadow-lg disabled:opacity-50 active:scale-95"
             >
               {isParsing ? (
                 <>
                   <Loader2 className="w-4 h-4 animate-spin" />
-                  <span>Gemini AI টেক্সট এনালাইস করছে...</span>
+                  <span>Gemini AI টেক্সট এনালাইস ও এক্সট্র্যাক্ট করছে...</span>
                 </>
               ) : (
                 <>
                   <Sparkles className="w-4 h-4" />
-                  <span>Gemini AI দিয়ে প্রশ্ন পার্স ও এক্সট্র্যাক্ট করুন</span>
+                  <span>Gemini AI দিয়ে প্রশ্ন পার্স ও এক্সট্র্যাক্ট করুন</span>
                 </>
               )}
             </button>
@@ -683,8 +894,14 @@ export const AIGeneratorTab: React.FC<Props> = ({
                 </h4>
 
                 <button
-                  onClick={() => handleBulkSave(parsedPreviewList, parseSubject, parseCadre)}
-                  className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-semibold text-xs shadow-md"
+                  onClick={() =>
+                    handleBulkSave(
+                      parsedPreviewList,
+                      (isParseCustomSubject ? parseCustomSubject : parseSubjectSelect) || 'সাধারণ বিষয়',
+                      (isParseCustomCadre ? parseCustomCadre : parseCadreSelect) || 'প্রভাষক (আরবি)'
+                    )
+                  }
+                  className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-semibold text-xs shadow-md active:scale-95"
                 >
                   <Database className="w-4 h-4" />
                   <span>সবগুলো ১-ক্লিকে ইনসার্ট করুন</span>
@@ -697,7 +914,9 @@ export const AIGeneratorTab: React.FC<Props> = ({
                     <div className="flex items-center justify-between gap-2 border-b border-slate-800 pb-2">
                       <div className="flex items-center gap-2">
                         <span className="font-bold text-teal-400 font-mono">প্রশ্ন {idx + 1}.</span>
-                        <span className="text-[10px] text-slate-400 font-mono">{parseSubject}</span>
+                        <span className="text-[10px] text-slate-400 font-mono">
+                          {(isParseCustomSubject ? parseCustomSubject : parseSubjectSelect) || 'সাধারণ'}
+                        </span>
                       </div>
                       <div className="flex items-center gap-2">
                         <button
@@ -718,8 +937,13 @@ export const AIGeneratorTab: React.FC<Props> = ({
                     </div>
 
                     <p className="font-medium text-slate-100">{item.question_bn}</p>
+                    {item.question_ar && (
+                      <p className="font-serif text-teal-300 text-right text-sm" dir="rtl">
+                        {item.question_ar}
+                      </p>
+                    )}
 
-                    <div className="grid grid-cols-2 gap-2 pt-1">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1">
                       {item.options?.map((opt: string, oIdx: number) => (
                         <div
                           key={oIdx}
@@ -756,21 +980,42 @@ export const AIGeneratorTab: React.FC<Props> = ({
           </h3>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-            <div>
-              <label className="block text-slate-300 font-medium mb-1">বিষয় (Subject) *</label>
-              <select
-                value={manualForm.subject}
-                onChange={(e) => setManualForm({ ...manualForm, subject: e.target.value as Subject })}
-                className="w-full bg-slate-950 border border-slate-800 rounded-xl p-2.5 text-slate-100 focus:border-emerald-500 focus:outline-none"
-              >
-                {subjectsList.map((s) => (
-                  <option key={s} value={s}>{s}</option>
-                ))}
-              </select>
+            {/* Manual Subject */}
+            <div className="space-y-1">
+              <div className="flex items-center justify-between">
+                <label className="text-slate-300 font-medium">বিষয় (Subject) *</label>
+                <button
+                  type="button"
+                  onClick={() => setIsManualCustomSubject(!isManualCustomSubject)}
+                  className="text-[10px] text-emerald-400 hover:underline font-semibold"
+                >
+                  {isManualCustomSubject ? 'তালিকা' : '+ কাস্টম বিষয়'}
+                </button>
+              </div>
+              {isManualCustomSubject ? (
+                <input
+                  type="text"
+                  value={manualCustomSubject}
+                  onChange={(e) => setManualCustomSubject(e.target.value)}
+                  placeholder="যেমন: ফিকহুছ সুন্নাহ"
+                  className="w-full bg-slate-950 border border-emerald-500/80 rounded-xl p-2.5 text-slate-100 focus:outline-none"
+                />
+              ) : (
+                <select
+                  value={manualSubjectSelect}
+                  onChange={(e) => setManualSubjectSelect(e.target.value)}
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl p-2.5 text-slate-100 focus:border-emerald-500 focus:outline-none"
+                >
+                  {allSubjectsList.map((s) => (
+                    <option key={s} value={s}>{s}</option>
+                  ))}
+                </select>
+              )}
             </div>
 
-            <div>
-              <label className="block text-slate-300 font-medium mb-1">টপিক (Topic)</label>
+            {/* Manual Topic */}
+            <div className="space-y-1">
+              <label className="text-slate-300 font-medium">টপিক (Topic)</label>
               <input
                 type="text"
                 value={manualForm.topic}
@@ -780,21 +1025,42 @@ export const AIGeneratorTab: React.FC<Props> = ({
               />
             </div>
 
-            <div>
-              <label className="block text-slate-300 font-medium mb-1">ক্যাডার টার্গেট *</label>
-              <select
-                value={manualForm.cadre_tier}
-                onChange={(e) => setManualForm({ ...manualForm, cadre_tier: e.target.value as CadreTier })}
-                className="w-full bg-slate-950 border border-slate-800 rounded-xl p-2.5 text-slate-100 focus:border-emerald-500 focus:outline-none"
-              >
-                {cadreTiersList.map((c) => (
-                  <option key={c} value={c}>{c}</option>
-                ))}
-              </select>
+            {/* Manual Cadre */}
+            <div className="space-y-1">
+              <div className="flex items-center justify-between">
+                <label className="text-slate-300 font-medium">পদ / ক্যাডার টার্গেট *</label>
+                <button
+                  type="button"
+                  onClick={() => setIsManualCustomCadre(!isManualCustomCadre)}
+                  className="text-[10px] text-emerald-400 hover:underline font-semibold"
+                >
+                  {isManualCustomCadre ? 'তালিকা' : '+ কাস্টম পদ'}
+                </button>
+              </div>
+              {isManualCustomCadre ? (
+                <input
+                  type="text"
+                  value={manualCustomCadre}
+                  onChange={(e) => setManualCustomCadre(e.target.value)}
+                  placeholder="যেমন: সহকারী শিক্ষক (ইসলাম শিক্ষা)"
+                  className="w-full bg-slate-950 border border-emerald-500/80 rounded-xl p-2.5 text-slate-100 focus:outline-none"
+                />
+              ) : (
+                <select
+                  value={manualCadreSelect}
+                  onChange={(e) => setManualCadreSelect(e.target.value)}
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl p-2.5 text-slate-100 focus:border-emerald-500 focus:outline-none"
+                >
+                  {standardCadreTiers.map((c) => (
+                    <option key={c} value={c}>{c}</option>
+                  ))}
+                </select>
+              )}
             </div>
 
-            <div>
-              <label className="block text-slate-300 font-medium mb-1">ডিফিকাল্টি</label>
+            {/* Difficulty */}
+            <div className="space-y-1">
+              <label className="text-slate-300 font-medium">ডিফিকাল্টি</label>
               <select
                 value={manualForm.difficulty}
                 onChange={(e) => setManualForm({ ...manualForm, difficulty: e.target.value as Difficulty })}
@@ -815,12 +1081,14 @@ export const AIGeneratorTab: React.FC<Props> = ({
               onChange={(e) => setManualForm({ ...manualForm, question_bn: e.target.value })}
               placeholder="প্রশ্ন টেক্সট লিখুন..."
               className="w-full bg-slate-950 border border-slate-800 rounded-xl p-2.5 text-slate-100 focus:border-emerald-500 focus:outline-none"
-              required
             />
           </div>
 
           <div>
-            <label className="block text-slate-300 font-medium mb-1">প্রশ্ন আরবি টেক্সট (যদি থাকে)</label>
+            <label className="block text-slate-300 font-medium mb-1 flex items-center justify-between">
+              <span>প্রশ্ন আরবি টেক্সট (যদি থাকে)</span>
+              <span className="text-[10px] text-amber-400 font-serif" dir="rtl">النص العربي</span>
+            </label>
             <input
               type="text"
               value={manualForm.question_ar}
@@ -870,7 +1138,6 @@ export const AIGeneratorTab: React.FC<Props> = ({
                     }}
                     placeholder={`অপশন ${['ক', 'খ', 'গ', 'ঘ'][oIdx]}`}
                     className="w-full bg-transparent text-slate-100 text-xs focus:outline-none"
-                    required
                   />
                 </div>
               ))}
@@ -890,7 +1157,7 @@ export const AIGeneratorTab: React.FC<Props> = ({
 
           <button
             type="submit"
-            className="w-full py-3 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs shadow-md"
+            className="w-full py-3 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs shadow-md active:scale-95 transition-all"
           >
             প্রশ্ন ডাটাবেজে সংরক্ষণ করুন
           </button>
@@ -1014,16 +1281,16 @@ export const AIGeneratorTab: React.FC<Props> = ({
                 <button
                   type="button"
                   onClick={() => setEditingPreviewItem(null)}
-                  className="px-4 py-2 rounded-xl bg-slate-800 text-slate-300 font-medium"
+                  className="px-4 py-2 rounded-xl bg-slate-800 text-slate-300 font-medium text-xs"
                 >
                   বাতিল
                 </button>
                 <button
                   type="button"
                   onClick={handleSavePreviewItemEdit}
-                  className="px-5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-semibold shadow-md"
+                  className="px-5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-semibold shadow-md text-xs"
                 >
-                  আপডেট আপডেট করুন
+                  আপডেট করুন
                 </button>
               </div>
             </div>

@@ -277,7 +277,7 @@ export const ModelTestsTab: React.FC<Props> = ({
         <div>
           <h2 className="text-xl font-bold text-white font-serif flex items-center gap-2">
             <FileCheck2 className="w-6 h-6 text-emerald-400" />
-            মডেল টেস্ট ও ফ্রি পরীক্ষা ব্যবস্থাপনা
+            মডেল টেস্ট ও ফ্রি পরীক্ষা ব্যবস্থাপনা ({modelTests.length}টি পরীক্ষা)
           </h2>
           <p className="text-xs text-slate-400 mt-1">
             NTRCA ক্যাডার ভিত্তিক মডেল টেস্ট তৈরি, নেগেটিভ মার্কিং সেটআপ ও প্রশ্ন বিন্যাস।
