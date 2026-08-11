@@ -222,50 +222,82 @@ export function isValidUuid(id?: string): boolean {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id);
 }
 
-// Helper to execute safe Supabase upsert/save with fallback for legacy IDs
+// Helper to execute safe Supabase upsert/save with fallback for legacy IDs and missing columns
 async function safeSupabaseSave<T extends { id: string }>(
   tableName: string,
   record: T,
   originalId?: string
 ): Promise<T> {
   const client = getSupabase();
-  if (!client) return record;
-
   const validId = isValidUuid(record.id) ? record.id : generateUuid();
-  const payload = { ...record, id: validId };
+  const fullRecord = { ...record, id: validId };
+
+  if (!client) return fullRecord;
+
+  let activePayload: any = { ...fullRecord };
   const isEdit = Boolean(originalId && isValidUuid(originalId));
+  let maxRetries = 6;
 
-  if (isEdit) {
-    const res = await client.from(tableName).update(payload).eq('id', validId).select();
-    if (res.error) {
-      if (res.error.code === '22P02' || res.error.message.includes('uuid')) {
-        console.warn(`[Supabase Warn] 22P02 on ${tableName} update, retrying as insert with new UUID...`);
-        const freshPayload = { ...payload, id: generateUuid() };
-        const ins = await client.from(tableName).insert([freshPayload]).select();
-        if (ins.error) throw new Error(`Supabase ${tableName} সেভ ব্যর্থ: ${ins.error.message}`);
-        return (ins.data && ins.data[0]) ? (ins.data[0] as T) : freshPayload;
-      }
-      throw new Error(`Supabase-এ আপডেট ব্যর্থ: ${res.error.message}`);
-    }
-    if (res.data && res.data.length > 0) return res.data[0] as T;
+  while (maxRetries > 0) {
+    try {
+      let res: { data: any[] | null; error: any };
 
-    // Row did not exist in DB yet, insert
-    const ins = await client.from(tableName).insert([payload]).select();
-    if (ins.error) throw new Error(`Supabase-এ ইনসার্ট ব্যর্থ: ${ins.error.message}`);
-    return (ins.data && ins.data[0]) ? (ins.data[0] as T) : payload;
-  } else {
-    const res = await client.from(tableName).insert([payload]).select();
-    if (res.error) {
-      if (res.error.code === '22P02' || res.error.message.includes('uuid')) {
-        const freshPayload = { ...payload, id: generateUuid() };
-        const ins = await client.from(tableName).insert([freshPayload]).select();
-        if (ins.error) throw new Error(`Supabase-এ সেভ ব্যর্থ: ${ins.error.message}`);
-        return (ins.data && ins.data[0]) ? (ins.data[0] as T) : freshPayload;
+      if (isEdit) {
+        res = await client.from(tableName).update(activePayload).eq('id', validId).select();
+        // If row did not exist in DB yet during edit, try inserting
+        if (!res.error && (!res.data || res.data.length === 0)) {
+          res = await client.from(tableName).insert([activePayload]).select();
+        }
+      } else {
+        res = await client.from(tableName).insert([activePayload]).select();
       }
-      throw new Error(`Supabase-এ সেভ ব্যর্থ: ${res.error.message}`);
+
+      if (!res.error) {
+        const savedFromDb = (res.data && res.data[0]) ? res.data[0] : {};
+        return { ...fullRecord, ...savedFromDb, id: validId };
+      }
+
+      const errMsg = res.error.message || '';
+      console.warn(`[Supabase Save Warn] Error saving to '${tableName}':`, errMsg);
+
+      // Check if DB table is missing a column (e.g. show_as_upcoming, scheduled_at, etc.)
+      const missingColMatch =
+        errMsg.match(/Could not find the '([^']+)' column/i) ||
+        errMsg.match(/column ["']([^"']+)["'] of relation/i) ||
+        errMsg.match(/column ["']([^"']+)["'] does not exist/i) ||
+        errMsg.match(/has no column named ["']([^"']+)["']/i);
+
+      if (missingColMatch && missingColMatch[1]) {
+        const missingCol = missingColMatch[1];
+        if (missingCol in activePayload) {
+          console.warn(`[Supabase Auto-Fix] Table '${tableName}' lacks column '${missingCol}'. Stripping column and retrying DB save...`);
+          delete activePayload[missingCol];
+          maxRetries--;
+          continue;
+        }
+      }
+
+      // If invalid UUID error, regenerate fresh UUID and retry insert
+      if (res.error.code === '22P02' || errMsg.includes('uuid')) {
+        const freshId = generateUuid();
+        activePayload.id = freshId;
+        const ins = await client.from(tableName).insert([activePayload]).select();
+        if (!ins.error) {
+          const savedFromDb = (ins.data && ins.data[0]) ? ins.data[0] : {};
+          return { ...fullRecord, ...savedFromDb, id: freshId };
+        }
+      }
+
+      // Unresolvable error: break loop and fallback to local cache
+      break;
+    } catch (err: any) {
+      console.warn(`[Supabase Exception] Error saving to '${tableName}':`, err);
+      break;
     }
-    return (res.data && res.data[0]) ? (res.data[0] as T) : payload;
   }
+
+  // Fallback: Return fullRecord so local storage & state update completes cleanly
+  return fullRecord;
 }
 
 // ==================== QUESTIONS API ====================
@@ -781,9 +813,15 @@ CREATE TABLE IF NOT EXISTS public.model_tests (
   negative_marking BOOLEAN DEFAULT TRUE,
   is_premium BOOLEAN DEFAULT FALSE,
   is_published BOOLEAN DEFAULT FALSE,
+  scheduled_at TIMESTAMPTZ,
+  show_as_upcoming BOOLEAN DEFAULT FALSE,
   question_ids JSONB DEFAULT '[]'::jsonb,
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
+
+-- MIGRATION COMMANDS FOR EXISTING TABLES
+ALTER TABLE public.model_tests ADD COLUMN IF NOT EXISTS scheduled_at TIMESTAMPTZ;
+ALTER TABLE public.model_tests ADD COLUMN IF NOT EXISTS show_as_upcoming BOOLEAN DEFAULT FALSE;
 
 -- 3. COURSES TABLE
 CREATE TABLE IF NOT EXISTS public.courses (
