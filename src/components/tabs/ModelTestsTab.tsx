@@ -1,9 +1,8 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   FileCheck2,
   Plus,
   Search,
-  Filter,
   Clock,
   Award,
   CheckCircle2,
@@ -16,13 +15,110 @@ import {
   MoveUp,
   MoveDown,
   Sparkles,
-  ChevronRight,
   X,
   FileEdit,
-  Globe
+  Globe,
+  Calendar,
+  Lock,
+  Timer,
+  Smartphone,
+  Shield,
+  Play,
+  Zap,
+  AlertCircle
 } from 'lucide-react';
 import { ModelTest, Question, Subject, CadreTier } from '../../types';
 import { useToast } from '../Toast';
+
+// Helper to convert numbers to Bengali digits
+export const toBengaliDigits = (num: number | string): string => {
+  const bnDigits = ['০', '১', '২', '৩', '৪', '৫', '৬', '৭', '৮', '৯'];
+  return String(num).replace(/\d/g, (digit) => bnDigits[parseInt(digit, 10)] || digit);
+};
+
+// Helper to format ISO date string to Bengali date and time
+export const formatBengaliDateTime = (dateStr?: string): string => {
+  if (!dateStr) return '';
+  try {
+    const date = new Date(dateStr);
+    if (isNaN(date.getTime())) return dateStr;
+
+    const months = [
+      'জানুয়ারি', 'ফেব্রুয়ারি', 'মার্চ', 'এপ্রিল', 'মে', 'জুন',
+      'জুলাই', 'আগস্ট', 'সেপ্টেম্বর', 'অক্টোবর', 'নভেম্বর', 'ডিসেম্বর'
+    ];
+
+    const day = date.getDate();
+    const month = months[date.getMonth()];
+    const year = date.getFullYear();
+    let hours = date.getHours();
+    const minutes = date.getMinutes();
+    const ampm = hours >= 12 ? 'PM' : 'AM';
+    hours = hours % 12 || 12;
+
+    const timeFormatted = `${toBengaliDigits(hours)}:${toBengaliDigits(String(minutes).padStart(2, '0'))} ${ampm}`;
+    return `${toBengaliDigits(day)} ${month}, ${toBengaliDigits(year)} ${timeFormatted}`;
+  } catch {
+    return dateStr;
+  }
+};
+
+// Countdown Timer Component for Scheduled Upcoming Tests
+const CountdownTimer: React.FC<{ targetDate: string; onExpire?: () => void }> = ({ targetDate, onExpire }) => {
+  const [timeLeft, setTimeLeft] = useState({
+    days: 0,
+    hours: 0,
+    minutes: 0,
+    seconds: 0,
+    isExpired: false
+  });
+
+  useEffect(() => {
+    const calculateTime = () => {
+      const target = new Date(targetDate).getTime();
+      const now = new Date().getTime();
+      const difference = target - now;
+
+      if (difference <= 0) {
+        setTimeLeft({ days: 0, hours: 0, minutes: 0, seconds: 0, isExpired: true });
+        if (onExpire) onExpire();
+        return;
+      }
+
+      const days = Math.floor(difference / (1000 * 60 * 60 * 24));
+      const hours = Math.floor((difference % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
+      const minutes = Math.floor((difference % (1000 * 60 * 60)) / (1000 * 60));
+      const seconds = Math.floor((difference % (1000 * 60)) / 1000);
+
+      setTimeLeft({ days, hours, minutes, seconds, isExpired: false });
+    };
+
+    calculateTime();
+    const timer = setInterval(calculateTime, 1000);
+    return () => clearInterval(timer);
+  }, [targetDate]);
+
+  if (timeLeft.isExpired) {
+    return (
+      <span className="text-emerald-400 font-bold flex items-center gap-1 text-xs">
+        <Sparkles className="w-3.5 h-3.5 animate-bounce text-emerald-400" />
+        পরীক্ষাটি এখন লাইভ!
+      </span>
+    );
+  }
+
+  return (
+    <div className="flex items-center gap-1 font-mono text-[11px] font-bold text-amber-300 bg-amber-950/80 border border-amber-500/40 px-2.5 py-1 rounded-lg">
+      <Timer className="w-3.5 h-3.5 text-amber-400 animate-pulse shrink-0" />
+      <span>
+        {timeLeft.days > 0 && `${toBengaliDigits(timeLeft.days)} দিন `}
+        {toBengaliDigits(String(timeLeft.hours).padStart(2, '0'))} ঘণ্টা{' '}
+        {toBengaliDigits(String(timeLeft.minutes).padStart(2, '0'))} মি.{' '}
+        {toBengaliDigits(String(timeLeft.seconds).padStart(2, '0'))} সে. পর শুরু
+      </span>
+    </div>
+  );
+};
 
 interface Props {
   modelTests: ModelTest[];
@@ -38,9 +134,15 @@ export const ModelTestsTab: React.FC<Props> = ({
   onDeleteModelTest
 }) => {
   const { showToast } = useToast();
+  
+  // Top View Switcher: 'admin' (Management Panel) vs 'student_app' (Student App Live View)
+  const [viewMode, setViewMode] = useState<'admin' | 'student_app'>('admin');
+
+  // Filters & Search State
   const [search, setSearch] = useState('');
   const [selectedSubject, setSelectedSubject] = useState<string>('All');
   const [selectedStatus, setSelectedStatus] = useState<string>('All');
+  const [studentTab, setStudentTab] = useState<'all' | 'live' | 'upcoming'>('all');
 
   // Modal State
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -55,12 +157,46 @@ export const ModelTestsTab: React.FC<Props> = ({
   const [examSubmitted, setExamSubmitted] = useState(false);
   const [examTimeLeft, setExamTimeLeft] = useState(0);
 
-  // Question selection filter inside create modal
-  const [modalQuestionSearch, setModalQuestionSearch] = useState('');
-  const [modalQuestionSubjectFilter, setModalQuestionSubjectFilter] = useState('All');
+  // Scheduled Launch Form State
+  const [isScheduled, setIsScheduled] = useState(false);
 
-  // Timer Effect for Live Exam
-  React.useEffect(() => {
+  // Form State
+  const [formData, setFormData] = useState({
+    id: '',
+    title: '',
+    subtitle: '',
+    subject: 'বালাগাত ও মানতিক' as Subject,
+    cadre_tier: 'প্রভাষক (আরবি)' as CadreTier,
+    duration_minutes: 60,
+    total_marks: 100,
+    pass_mark: 50,
+    negative_marking: true,
+    is_premium: false,
+    is_published: true,
+    scheduled_at: '',
+    show_as_upcoming: true,
+    question_ids: [] as string[]
+  });
+
+  const subjectsList: Subject[] = [
+    'বালাগাত ও মানতিক',
+    'আল-কুরআন',
+    'হাদিস',
+    'ফিকহ্ ও উসুল',
+    'বাংলা',
+    'ইংরেজি',
+    'আইসিটি ও সাধারণ জ্ঞান'
+  ];
+
+  const cadreTiersList: CadreTier[] = [
+    'প্রভাষক (আরবি)',
+    'সহকারী শিক্ষক (আরবি)',
+    'সহকারী মৌলভী',
+    'ইবতেদায়ী প্রধান'
+  ];
+
+  // Live Exam Runner Timer
+  useEffect(() => {
     if (!activeExam || examSubmitted || examTimeLeft <= 0) return;
     const interval = setInterval(() => {
       setExamTimeLeft((prev) => {
@@ -82,53 +218,75 @@ export const ModelTestsTab: React.FC<Props> = ({
     setExamTimeLeft((test.duration_minutes || 60) * 60);
   };
 
-  // Form State
-  const [formData, setFormData] = useState({
-    id: '',
-    title: '',
-    subtitle: '',
-    subject: 'বালাগাত ও মানতিক' as Subject,
-    cadre_tier: 'প্রভাষক (আরবি)' as CadreTier,
-    duration_minutes: 60,
-    total_marks: 100,
-    pass_mark: 50,
-    negative_marking: true,
-    is_premium: false,
-    is_published: true,
-    question_ids: [] as string[]
-  });
+  // Helper function to check test schedule status
+  const getTestScheduleState = (test: ModelTest) => {
+    if (!test.is_published) {
+      return { isDraft: true, isUpcoming: false, isLive: false };
+    }
 
-  const subjectsList: Subject[] = [
-    'বালাগাত ও মানতিক',
-    'আল-কুরআন',
-    'হাদিস',
-    'ফিকহ্ ও উসুল',
-    'বাংলা',
-    'ইংরেজি',
-    'আইসিটি ও সাধারণ জ্ঞান'
-  ];
+    if (test.scheduled_at) {
+      const scheduledTime = new Date(test.scheduled_at).getTime();
+      const now = new Date().getTime();
+      if (!isNaN(scheduledTime) && scheduledTime > now) {
+        return { isDraft: false, isUpcoming: true, isLive: false };
+      }
+    }
 
-  const cadreTiersList: CadreTier[] = [
-    'প্রভাষক (আরবি)',
-    'সহকারী শিক্ষক (আরবি)',
-    'সহকারী মৌলভী',
-    'ইবতেদায়ী প্রধান'
-  ];
+    return { isDraft: false, isUpcoming: false, isLive: true };
+  };
 
-  // Filter Logic
-  const filteredTests = modelTests.filter((test) => {
+  // Admin View Filter Logic
+  const filteredAdminTests = modelTests.filter((test) => {
     const matchesSearch =
       test.title.toLowerCase().includes(search.toLowerCase()) ||
       test.subtitle.toLowerCase().includes(search.toLowerCase());
     const matchesSubject = selectedSubject === 'All' || test.subject === selectedSubject;
-    const matchesStatus =
-      selectedStatus === 'All' ||
-      (selectedStatus === 'Published' && test.is_published) ||
-      (selectedStatus === 'Draft' && !test.is_published) ||
-      (selectedStatus === 'VIP' && test.is_premium) ||
-      (selectedStatus === 'Free' && !test.is_premium);
+    
+    const schedState = getTestScheduleState(test);
+
+    let matchesStatus = true;
+    if (selectedStatus === 'Published') matchesStatus = test.is_published && !schedState.isUpcoming;
+    else if (selectedStatus === 'Draft') matchesStatus = !test.is_published;
+    else if (selectedStatus === 'Scheduled') matchesStatus = test.is_published && schedState.isUpcoming;
+    else if (selectedStatus === 'VIP') matchesStatus = test.is_premium;
+    else if (selectedStatus === 'Free') matchesStatus = !test.is_premium;
 
     return matchesSearch && matchesSubject && matchesStatus;
+  });
+
+  // Student App View Filter Logic
+  // RULES:
+  // 1. MUST NOT show draft tests (is_published === false)
+  // 2. Scheduled test with scheduled_at in the future:
+  //    - show_as_upcoming === false -> HIDDEN from student view until scheduled_at arrives
+  //    - show_as_upcoming === true -> SHOWN as UPCOMING test with countdown timer & lock icon
+  // 3. Normal published test or scheduled test whose launch time has arrived -> SHOWN as LIVE ACTIVE test
+  const studentAppVisibleTests = modelTests.filter((test) => {
+    // Rule 1: Draft tests are strictly hidden from student app
+    if (!test.is_published) return false;
+
+    const matchesSearch =
+      test.title.toLowerCase().includes(search.toLowerCase()) ||
+      test.subtitle.toLowerCase().includes(search.toLowerCase());
+    const matchesSubject = selectedSubject === 'All' || test.subject === selectedSubject;
+
+    if (!matchesSearch || !matchesSubject) return false;
+
+    const schedState = getTestScheduleState(test);
+
+    // Rule 2: If test is scheduled for future
+    if (schedState.isUpcoming) {
+      // If show_as_upcoming is false, hide completely from app until launch time
+      if (!test.show_as_upcoming) return false;
+
+      // If student tab is 'live', exclude upcoming
+      if (studentTab === 'live') return false;
+      return true;
+    }
+
+    // Rule 3: Test is Live
+    if (studentTab === 'upcoming') return false;
+    return true;
   });
 
   const handleOpenCreate = () => {
@@ -144,8 +302,11 @@ export const ModelTestsTab: React.FC<Props> = ({
       negative_marking: true,
       is_premium: false,
       is_published: true,
-      question_ids: questions.slice(0, 3).map((q) => q.id)
+      scheduled_at: '',
+      show_as_upcoming: true,
+      question_ids: questions.slice(0, 5).map((q) => q.id)
     });
+    setIsScheduled(false);
     setEditingTest(null);
     setIsModalOpen(true);
   };
@@ -163,8 +324,11 @@ export const ModelTestsTab: React.FC<Props> = ({
       negative_marking: test.negative_marking,
       is_premium: test.is_premium,
       is_published: test.is_published,
+      scheduled_at: test.scheduled_at || '',
+      show_as_upcoming: test.show_as_upcoming !== undefined ? test.show_as_upcoming : true,
       question_ids: test.question_ids || []
     });
+    setIsScheduled(Boolean(test.scheduled_at));
     setEditingTest(test);
     setIsModalOpen(true);
   };
@@ -174,6 +338,8 @@ export const ModelTestsTab: React.FC<Props> = ({
       showToast('ত্রুটি', 'মডেল টেস্ট শিরোনাম টাইপ করুন', 'error');
       return;
     }
+
+    const scheduledAtValue = isScheduled && formData.scheduled_at ? formData.scheduled_at : undefined;
 
     try {
       const saved = await onSaveModelTest({
@@ -188,22 +354,30 @@ export const ModelTestsTab: React.FC<Props> = ({
         negative_marking: formData.negative_marking,
         is_premium: formData.is_premium,
         is_published: publishState,
+        scheduled_at: scheduledAtValue,
+        show_as_upcoming: formData.show_as_upcoming,
         question_ids: formData.question_ids
       });
 
       const title = saved?.title || formData.title;
 
-      if (publishState) {
+      if (!publishState) {
         showToast(
-          'সরাসরি পাবলিশড ও লাইভ!',
-          `"${title}" মডেল টেস্টটি সুপাবেস ডাটাবেসে সফলভাবে সংরক্ষিত হয়েছে এবং শিক্ষার্থীদের জন্য অ্যাপে লাইভ করা হয়েছে।`,
+          'ড্রাফট হিসেবে সংরক্ষিত',
+          `"${title}" খসড়া ফোল্ডারে সেভ করা হয়েছে (অ্যাপে গোপন থাকবে)।`,
+          'info'
+        );
+      } else if (scheduledAtValue && new Date(scheduledAtValue).getTime() > new Date().getTime()) {
+        showToast(
+          'অগ্রীম সময় সেট করা হয়েছে!',
+          `"${title}" পরীক্ষাটি ${formatBengaliDateTime(scheduledAtValue)} তারিখে প্রকাশের জন্য শিডিউল করা হলো।`,
           'success'
         );
       } else {
         showToast(
-          'ড্রাফট হিসেবে সংরক্ষিত',
-          `"${title}" খসড়া ফোল্ডারে সেভ করা হয়েছে (অ্যাপে এখনো লাইভ নয়)।`,
-          'info'
+          'সরাসরি পাবলিশড ও লাইভ!',
+          `"${title}" পরীক্ষাটি সরাসরি শিক্ষার্থীদের অ্যাপে লাইভ করা হলো।`,
+          'success'
         );
       }
       setIsModalOpen(false);
@@ -211,7 +385,7 @@ export const ModelTestsTab: React.FC<Props> = ({
       console.error('[Model Test Save Error]:', err);
       showToast(
         'সেভ করা ব্যর্থ হয়েছে!',
-        err.message || 'Supabase ডাটাবেসে মডেল টেস্ট ইনসার্ট করার সময় ত্রুটি ঘটেছে।',
+        err.message || 'ডাটাবেসে মডেল টেস্ট সেভ করার সময় ত্রুটি ঘটেছে।',
         'error'
       );
     }
@@ -250,8 +424,8 @@ export const ModelTestsTab: React.FC<Props> = ({
         is_published: !test.is_published
       });
       showToast(
-        test.is_published ? 'Unpublished' : 'Published',
-        `"${test.title}" স্ট্যাটাস পরিবর্তন করা হয়েছে।`,
+        test.is_published ? 'Unpublished (Draft)' : 'Published (Live)',
+        `"${test.title}" পরীক্ষাটির পাবলিশড স্ট্যাটাস পরিবর্তন করা হয়েছে।`,
         'info'
       );
     } catch (err: any) {
@@ -270,174 +444,503 @@ export const ModelTestsTab: React.FC<Props> = ({
     }
   };
 
+  // Metrics counters for Admin overview
+  const totalCount = modelTests.length;
+  const publishedCount = modelTests.filter((m) => m.is_published && (!m.scheduled_at || new Date(m.scheduled_at).getTime() <= new Date().getTime())).length;
+  const draftCount = modelTests.filter((m) => !m.is_published).length;
+  const scheduledCount = modelTests.filter((m) => m.is_published && m.scheduled_at && new Date(m.scheduled_at).getTime() > new Date().getTime()).length;
+
   return (
     <div className="space-y-6">
-      {/* Header Bar */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-slate-900 border border-slate-800 p-5 rounded-2xl">
+      {/* Top Main Banner & View Switcher */}
+      <div className="bg-slate-900 border border-slate-800 p-5 rounded-2xl flex flex-col md:flex-row md:items-center justify-between gap-4 shadow-xl">
         <div>
+          <div className="flex items-center gap-2 mb-1">
+            <span className="text-[11px] font-bold px-2.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
+              তামরীন একাডেমি মডেল টেস্ট হাব
+            </span>
+          </div>
           <h2 className="text-xl font-bold text-white font-serif flex items-center gap-2">
             <FileCheck2 className="w-6 h-6 text-emerald-400" />
-            মডেল টেস্ট ও ফ্রি পরীক্ষা ব্যবস্থাপনা ({modelTests.length}টি পরীক্ষা)
+            মডেল টেস্ট ও স্পেশাল পরীক্ষা ব্যবস্থাপনা ({totalCount}টি পরীক্ষা)
           </h2>
           <p className="text-xs text-slate-400 mt-1">
-            NTRCA ক্যাডার ভিত্তিক মডেল টেস্ট তৈরি, নেগেটিভ মার্কিং সেটআপ ও প্রশ্ন বিন্যাস।
+            NTRCA ক্যাডার ভিত্তিক মডেল টেস্ট তৈরি, ড্রাইটিং, অগ্রীম লঞ্চ শিডিউলিং ও অটোমেটিক কাউন্টডাউন।
           </p>
         </div>
 
-        <button
-          onClick={handleOpenCreate}
-          className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-semibold text-xs transition-all shadow-md active:scale-95 shrink-0"
-        >
-          <Plus className="w-4 h-4" />
-          <span>নতুন মডেল টেস্ট তৈরি</span>
-        </button>
-      </div>
+        {/* View Switcher Tabs (Admin Panel vs Student App View) */}
+        <div className="flex items-center gap-2 bg-slate-950 p-1.5 rounded-xl border border-slate-800 shrink-0">
+          <button
+            onClick={() => setViewMode('admin')}
+            className={`flex items-center gap-2 px-3.5 py-2 rounded-lg text-xs font-bold transition-all ${
+              viewMode === 'admin'
+                ? 'bg-emerald-600 text-white shadow-md'
+                : 'text-slate-400 hover:text-white'
+            }`}
+          >
+            <Shield className="w-4 h-4" />
+            <span>এডমিন প্যানেল ভিউ</span>
+          </button>
 
-      {/* Filters & Search */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-        <div className="relative">
-          <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
-          <input
-            type="text"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder="মডেল টেস্ট খুঁজুন..."
-            className="w-full bg-slate-900 text-slate-100 text-xs rounded-xl pl-9 pr-4 py-2.5 border border-slate-800 focus:border-emerald-500 focus:outline-none"
-          />
-        </div>
+          <button
+            onClick={() => setViewMode('student_app')}
+            className={`flex items-center gap-2 px-3.5 py-2 rounded-lg text-xs font-bold transition-all ${
+              viewMode === 'student_app'
+                ? 'bg-emerald-600 text-white shadow-md'
+                : 'text-slate-400 hover:text-white'
+            }`}
+          >
+            <Smartphone className="w-4 h-4 text-emerald-200" />
+            <span>শিক্ষার্থী / অ্যাপ ভিউ</span>
+          </button>
 
-        <select
-          value={selectedSubject}
-          onChange={(e) => setSelectedSubject(e.target.value)}
-          className="bg-slate-900 text-slate-200 text-xs rounded-xl px-3 py-2.5 border border-slate-800 focus:border-emerald-500 focus:outline-none"
-        >
-          <option value="All">সব বিষয় (All Subjects)</option>
-          {subjectsList.map((s) => (
-            <option key={s} value={s}>{s}</option>
-          ))}
-        </select>
-
-        <select
-          value={selectedStatus}
-          onChange={(e) => setSelectedStatus(e.target.value)}
-          className="bg-slate-900 text-slate-200 text-xs rounded-xl px-3 py-2.5 border border-slate-800 focus:border-emerald-500 focus:outline-none"
-        >
-          <option value="All">সব স্ট্যাটাস (All Status)</option>
-          <option value="Published">পাবলিশড (Published)</option>
-          <option value="Draft">ড্রাফট (Draft)</option>
-          <option value="VIP">ভিআইপি প্রিমিয়াম (VIP Only)</option>
-          <option value="Free">ফ্রি এক্সেস (Free Test)</option>
-        </select>
-      </div>
-
-      {/* Model Tests Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
-        {filteredTests.map((test) => {
-          const qCount = test.question_ids?.length || 0;
-          return (
-            <div
-              key={test.id}
-              className="bg-slate-900 border border-slate-800 rounded-2xl p-5 flex flex-col justify-between hover:border-slate-700 transition-all shadow-md group relative overflow-hidden"
+          {viewMode === 'admin' && (
+            <button
+              onClick={handleOpenCreate}
+              className="flex items-center gap-1.5 px-3.5 py-2 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold text-xs transition-all shadow-md active:scale-95 ml-1"
             >
-              <div className="space-y-3">
-                {/* Badges */}
-                <div className="flex items-center justify-between gap-2">
-                  <span className="text-[10px] px-2.5 py-0.5 rounded-full bg-slate-800 text-emerald-400 border border-slate-700 font-medium">
-                    {test.subject}
-                  </span>
-                  <div className="flex items-center gap-1.5">
-                    {test.is_premium ? (
-                      <span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/30 font-semibold flex items-center gap-1">
-                        <ShieldCheck className="w-3 h-3 text-amber-400" />
-                        VIP Premium
+              <Plus className="w-4 h-4" />
+              <span>নতুন পরীক্ষা</span>
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/* ========================================================================= */}
+      {/* ADMIN MANAGEMENT VIEW */}
+      {/* ========================================================================= */}
+      {viewMode === 'admin' && (
+        <div className="space-y-6">
+          {/* Summary KPI Cards */}
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            <div className="bg-slate-900 border border-slate-800 p-3.5 rounded-xl flex items-center justify-between">
+              <div>
+                <span className="text-[11px] text-slate-400 block font-medium">মোট মডেল টেস্ট</span>
+                <strong className="text-xl font-bold text-white font-mono">{toBengaliDigits(totalCount)}টি</strong>
+              </div>
+              <FileCheck2 className="w-6 h-6 text-slate-500" />
+            </div>
+
+            <div className="bg-slate-900 border border-slate-800 p-3.5 rounded-xl flex items-center justify-between">
+              <div>
+                <span className="text-[11px] text-emerald-400 block font-medium">সরাসরি লাইভ (Published)</span>
+                <strong className="text-xl font-bold text-emerald-300 font-mono">{toBengaliDigits(publishedCount)}টি</strong>
+              </div>
+              <Globe className="w-6 h-6 text-emerald-500" />
+            </div>
+
+            <div className="bg-slate-900 border border-slate-800 p-3.5 rounded-xl flex items-center justify-between">
+              <div>
+                <span className="text-[11px] text-amber-400 block font-medium">শিডিউলড (Scheduled Launch)</span>
+                <strong className="text-xl font-bold text-amber-300 font-mono">{toBengaliDigits(scheduledCount)}টি</strong>
+              </div>
+              <Calendar className="w-6 h-6 text-amber-500" />
+            </div>
+
+            <div className="bg-slate-900 border border-slate-800 p-3.5 rounded-xl flex items-center justify-between">
+              <div>
+                <span className="text-[11px] text-slate-400 block font-medium">ড্রাফট (App Hidden)</span>
+                <strong className="text-xl font-bold text-slate-300 font-mono">{toBengaliDigits(draftCount)}টি</strong>
+              </div>
+              <FileEdit className="w-6 h-6 text-slate-400" />
+            </div>
+          </div>
+
+          {/* Search & Filter Bar */}
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            <div className="relative">
+              <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+              <input
+                type="text"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder="পরীক্ষার নাম খুঁজুন..."
+                className="w-full bg-slate-900 text-slate-100 text-xs rounded-xl pl-9 pr-4 py-2.5 border border-slate-800 focus:border-emerald-500 focus:outline-none"
+              />
+            </div>
+
+            <select
+              value={selectedSubject}
+              onChange={(e) => setSelectedSubject(e.target.value)}
+              className="bg-slate-900 text-slate-200 text-xs rounded-xl px-3 py-2.5 border border-slate-800 focus:border-emerald-500 focus:outline-none"
+            >
+              <option value="All">সব বিষয় (All Subjects)</option>
+              {subjectsList.map((s) => (
+                <option key={s} value={s}>{s}</option>
+              ))}
+            </select>
+
+            <select
+              value={selectedStatus}
+              onChange={(e) => setSelectedStatus(e.target.value)}
+              className="bg-slate-900 text-slate-200 text-xs rounded-xl px-3 py-2.5 border border-slate-800 focus:border-emerald-500 focus:outline-none"
+            >
+              <option value="All">সব স্ট্যাটাস (All Status)</option>
+              <option value="Published">সরাসরি লাইভ (Live Published)</option>
+              <option value="Scheduled">অগ্রীম শিডিউলড (Scheduled Launch)</option>
+              <option value="Draft">ড্রাফট (Draft - App Hidden)</option>
+              <option value="VIP">ভিআইপি প্রিমিয়াম (VIP Only)</option>
+              <option value="Free">ফ্রি টেস্ট (Free)</option>
+            </select>
+          </div>
+
+          {/* Model Tests Grid */}
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
+            {filteredAdminTests.map((test) => {
+              const qCount = test.question_ids?.length || 0;
+              const schedState = getTestScheduleState(test);
+
+              return (
+                <div
+                  key={test.id}
+                  className="bg-slate-900 border border-slate-800 rounded-2xl p-5 flex flex-col justify-between hover:border-slate-700 transition-all shadow-md group relative overflow-hidden"
+                >
+                  <div className="space-y-3">
+                    {/* Status & Category Badges */}
+                    <div className="flex items-center justify-between gap-2 flex-wrap">
+                      <span className="text-[10px] px-2.5 py-0.5 rounded-full bg-slate-800 text-emerald-400 border border-slate-700 font-medium">
+                        {test.subject}
                       </span>
-                    ) : (
-                      <span className="text-[10px] px-2 py-0.5 rounded-full bg-teal-500/20 text-teal-300 border border-teal-500/30 font-medium">
-                        Free Test
-                      </span>
+
+                      <div className="flex items-center gap-1.5">
+                        {test.is_premium ? (
+                          <span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/30 font-semibold flex items-center gap-1">
+                            <ShieldCheck className="w-3 h-3 text-amber-400" />
+                            VIP
+                          </span>
+                        ) : (
+                          <span className="text-[10px] px-2 py-0.5 rounded-full bg-teal-500/20 text-teal-300 border border-teal-500/30 font-medium">
+                            Free
+                          </span>
+                        )}
+
+                        {/* Status Toggle Button */}
+                        <button
+                          onClick={() => handleTogglePublish(test)}
+                          className={`text-[10px] px-2.5 py-0.5 rounded-full border font-bold transition-all flex items-center gap-1 ${
+                            schedState.isDraft
+                              ? 'bg-slate-800 text-slate-400 border-slate-700 hover:border-slate-500'
+                              : schedState.isUpcoming
+                              ? 'bg-amber-950 text-amber-300 border-amber-700 hover:bg-amber-900'
+                              : 'bg-emerald-950 text-emerald-300 border-emerald-700 hover:bg-emerald-900'
+                          }`}
+                          title="পাবলিশ/ড্রাফট স্ট্যাটাস পরিবর্তন করতে ক্লিক করুন"
+                        >
+                          {schedState.isDraft && (
+                            <>
+                              <FileEdit className="w-3 h-3 text-slate-400" />
+                              <span>ড্রাফট (App Hidden)</span>
+                            </>
+                          )}
+                          {schedState.isUpcoming && (
+                            <>
+                              <Calendar className="w-3 h-3 text-amber-400" />
+                              <span>শিডিউলড (Upcoming)</span>
+                            </>
+                          )}
+                          {schedState.isLive && (
+                            <>
+                              <Globe className="w-3 h-3 text-emerald-400" />
+                              <span>লাইভ (Published)</span>
+                            </>
+                          )}
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Title & Subtitle */}
+                    <div>
+                      <h3 className="text-base font-bold text-white font-serif leading-snug group-hover:text-emerald-300 transition-colors">
+                        {test.title}
+                      </h3>
+                      {test.subtitle && (
+                        <p className="text-xs text-slate-400 mt-1 line-clamp-2">
+                          {test.subtitle}
+                        </p>
+                      )}
+                    </div>
+
+                    {/* Scheduled Info & Countdown Banner if Scheduled */}
+                    {test.scheduled_at && schedState.isUpcoming && (
+                      <div className="bg-slate-950/90 border border-amber-500/30 p-2.5 rounded-xl space-y-1.5 text-xs">
+                        <div className="flex items-center justify-between text-[11px] text-amber-300">
+                          <span className="flex items-center gap-1">
+                            <Calendar className="w-3.5 h-3.5 text-amber-400" />
+                            প্রকাশের সময়:
+                          </span>
+                          <span className="font-semibold">{formatBengaliDateTime(test.scheduled_at)}</span>
+                        </div>
+                        <div className="flex items-center justify-between text-[10px] text-slate-400">
+                          <span>অ্যাপে আপকামিং দেখাবে:</span>
+                          <span className={test.show_as_upcoming ? 'text-emerald-400 font-bold' : 'text-slate-500'}>
+                            {test.show_as_upcoming ? 'হ্যাঁ (কাউন্টডাউন সহ)' : 'না (হিডেন)'}
+                          </span>
+                        </div>
+                        {test.show_as_upcoming && (
+                          <div className="pt-1">
+                            <CountdownTimer targetDate={test.scheduled_at} />
+                          </div>
+                        )}
+                      </div>
                     )}
 
-                    <button
-                      onClick={() => handleTogglePublish(test)}
-                      className={`text-[10px] px-2 py-0.5 rounded-full border transition-colors ${
-                        test.is_published
-                          ? 'bg-emerald-950/80 text-emerald-300 border-emerald-700'
-                          : 'bg-slate-800 text-slate-400 border-slate-700'
-                      }`}
-                      title="Click to Toggle Publish/Unpublish"
-                    >
-                      {test.is_published ? 'Published' : 'Draft'}
-                    </button>
+                    {/* Metrics Meta (Exact Questions, Time, Marks) */}
+                    <div className="grid grid-cols-3 gap-2 pt-2 border-t border-slate-800/80 text-[11px] text-slate-300 font-mono">
+                      <div className="flex items-center gap-1">
+                        <Clock className="w-3.5 h-3.5 text-slate-400" />
+                        <span>{toBengaliDigits(test.duration_minutes)} মিনিট</span>
+                      </div>
+                      <div className="flex items-center gap-1">
+                        <Award className="w-3.5 h-3.5 text-slate-400" />
+                        <span>{toBengaliDigits(test.total_marks)} মার্কস</span>
+                      </div>
+                      <div className="flex items-center gap-1 justify-end">
+                        <span className="text-emerald-400 font-bold">{toBengaliDigits(qCount)}টি MCQ</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Actions */}
+                  <div className="flex items-center justify-between pt-4 mt-4 border-t border-slate-800/80 gap-2">
+                    <div className="flex items-center gap-1.5">
+                      <button
+                        onClick={() => setPreviewTest(test)}
+                        className="text-xs text-slate-300 hover:text-emerald-400 flex items-center gap-1 font-medium transition-colors px-2.5 py-1 rounded-lg bg-slate-800/80 hover:bg-slate-800 border border-slate-700/60"
+                        title="প্রশ্নোত্তর রিভিউ দেখুন"
+                      >
+                        <Eye className="w-3.5 h-3.5" />
+                        <span>পূর্বরূপ</span>
+                      </button>
+
+                      <button
+                        onClick={() => handleStartLiveExam(test)}
+                        className="text-xs text-emerald-300 hover:text-emerald-200 flex items-center gap-1 font-medium transition-colors px-2.5 py-1 rounded-lg bg-emerald-950/60 hover:bg-emerald-900 border border-emerald-800/60"
+                        title="নিজে পরীক্ষা দিয়ে যাচাই করুন"
+                      >
+                        <Play className="w-3.5 h-3.5" />
+                        <span>টেস্ট পরীক্ষা</span>
+                      </button>
+                    </div>
+
+                    <div className="flex items-center gap-1">
+                      <button
+                        onClick={() => handleOpenEdit(test)}
+                        className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition-colors"
+                        title="এডিট করুন"
+                      >
+                        <Edit className="w-4 h-4" />
+                      </button>
+                      <button
+                        onClick={() => handleDelete(test.id, test.title)}
+                        className="p-1.5 rounded-lg text-slate-400 hover:text-rose-400 hover:bg-rose-950/40 transition-colors"
+                        title="মুছে ফেলুন"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </div>
                   </div>
                 </div>
+              );
+            })}
+          </div>
 
-                {/* Title */}
-                <div>
-                  <h3 className="text-base font-bold text-white font-serif leading-snug group-hover:text-emerald-300 transition-colors">
-                    {test.title}
-                  </h3>
-                  <p className="text-xs text-slate-400 mt-1 line-clamp-2">
-                    {test.subtitle}
-                  </p>
-                </div>
-
-                {/* Metrics Meta */}
-                <div className="grid grid-cols-3 gap-2 pt-2 border-t border-slate-800/80 text-[11px] text-slate-300 font-mono">
-                  <div className="flex items-center gap-1">
-                    <Clock className="w-3.5 h-3.5 text-slate-400" />
-                    <span>{test.duration_minutes} মিনিট</span>
-                  </div>
-                  <div className="flex items-center gap-1">
-                    <Award className="w-3.5 h-3.5 text-slate-400" />
-                    <span>{test.total_marks} মার্কস</span>
-                  </div>
-                  <div className="flex items-center gap-1 justify-end">
-                    <span className="text-emerald-400 font-bold">{qCount}টি MCQ</span>
-                  </div>
-                </div>
-              </div>
-
-              {/* Action Buttons */}
-              <div className="flex items-center justify-between pt-4 mt-4 border-t border-slate-800/80 gap-2">
-                <div className="flex items-center gap-2">
-                  <button
-                    onClick={() => setPreviewTest(test)}
-                    className="text-xs text-slate-300 hover:text-emerald-400 flex items-center gap-1 font-medium transition-colors px-2.5 py-1 rounded-lg bg-slate-800/80 hover:bg-slate-800 border border-slate-700/60"
-                  >
-                    <Eye className="w-3.5 h-3.5" />
-                    <span>পূর্বরূপ</span>
-                  </button>
-                </div>
-
-                <div className="flex items-center gap-1">
-                  <button
-                    onClick={() => handleOpenEdit(test)}
-                    className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition-colors"
-                    title="Edit Model Test"
-                  >
-                    <Edit className="w-4 h-4" />
-                  </button>
-                  <button
-                    onClick={() => handleDelete(test.id, test.title)}
-                    className="p-1.5 rounded-lg text-slate-400 hover:text-rose-400 hover:bg-rose-950/40 transition-colors"
-                    title="Delete Model Test"
-                  >
-                    <Trash2 className="w-4 h-4" />
-                  </button>
-                </div>
-              </div>
+          {filteredAdminTests.length === 0 && (
+            <div className="text-center py-12 bg-slate-900 border border-slate-800 rounded-2xl text-slate-400 text-sm space-y-2">
+              <FileCheck2 className="w-10 h-10 mx-auto text-slate-600" />
+              <p>কোনো মডেল টেস্ট পাওয়া যায়নি।</p>
             </div>
-          );
-        })}
-      </div>
-
-      {filteredTests.length === 0 && (
-        <div className="text-center py-12 bg-slate-900 border border-slate-800 rounded-2xl text-slate-400 text-sm">
-          কোনো মডেল টেস্ট পাওয়া যায়নি। নতুন মডেল টেস্ট তৈরি করতে "নতুন মডেল টেস্ট তৈরি" বাটনে ক্লিক করুন।
+          )}
         </div>
       )}
 
+      {/* ========================================================================= */}
+      {/* STUDENT / APP REAL VIEW MODE */}
+      {/* ========================================================================= */}
+      {viewMode === 'student_app' && (
+        <div className="space-y-6">
+          {/* Student Banner Notice */}
+          <div className="bg-gradient-to-r from-emerald-950 via-slate-900 to-teal-950 border border-emerald-800/60 p-4 rounded-2xl flex items-start gap-3">
+            <Smartphone className="w-6 h-6 text-emerald-400 shrink-0 mt-0.5" />
+            <div className="space-y-1 text-xs">
+              <h4 className="font-bold text-emerald-300 text-sm">শিক্ষার্থী মোবাইল অ্যাপ উইন্ডো (Live Student Interface)</h4>
+              <p className="text-slate-300 leading-relaxed">
+                এখানে শিক্ষার্থীরা যেভাবে অ্যাপে মডেল টেস্টসমূহ দেখতে পাবে তা সরাসরি প্রদর্শিত হচ্ছে।{' '}
+                <strong className="text-amber-300">ড্রাফট পরীক্ষাগুলো শিক্ষার্থী অ্যাপ থেকে সম্পূর্ণ হিডেন থাকে।</strong>{' '}
+                অগ্রীম সময় সেট করা থাকলে অ্যাপে 'আপকামিং' হিসেবে কাউন্টডাউন টাইমার সহ দেখাবে।
+              </p>
+            </div>
+          </div>
+
+          {/* Student Sub Tabs */}
+          <div className="flex items-center justify-between flex-wrap gap-3 bg-slate-900 p-3 rounded-xl border border-slate-800">
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => setStudentTab('all')}
+                className={`px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-all ${
+                  studentTab === 'all'
+                    ? 'bg-emerald-600 text-white shadow'
+                    : 'text-slate-400 hover:text-white'
+                }`}
+              >
+                সব পরীক্ষা (All)
+              </button>
+
+              <button
+                onClick={() => setStudentTab('live')}
+                className={`px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-all flex items-center gap-1.5 ${
+                  studentTab === 'live'
+                    ? 'bg-emerald-600 text-white shadow'
+                    : 'text-slate-400 hover:text-white'
+                }`}
+              >
+                <Zap className="w-3.5 h-3.5 text-amber-300" />
+                <span>চলতি পরীক্ষা (Live Now)</span>
+              </button>
+
+              <button
+                onClick={() => setStudentTab('upcoming')}
+                className={`px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-all flex items-center gap-1.5 ${
+                  studentTab === 'upcoming'
+                    ? 'bg-emerald-600 text-white shadow'
+                    : 'text-slate-400 hover:text-white'
+                }`}
+              >
+                <Clock className="w-3.5 h-3.5 text-amber-300" />
+                <span>আপকামিং পরীক্ষা (Upcoming)</span>
+              </button>
+            </div>
+
+            {/* Subject Dropdown */}
+            <select
+              value={selectedSubject}
+              onChange={(e) => setSelectedSubject(e.target.value)}
+              className="bg-slate-950 text-slate-200 text-xs rounded-xl px-3 py-1.5 border border-slate-800 focus:border-emerald-500 focus:outline-none"
+            >
+              <option value="All">সব বিষয় (Filter by Subject)</option>
+              {subjectsList.map((s) => (
+                <option key={s} value={s}>{s}</option>
+              ))}
+            </select>
+          </div>
+
+          {/* Student Visible Tests Cards Grid */}
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
+            {studentAppVisibleTests.map((test) => {
+              const qCount = test.question_ids?.length || 0;
+              const schedState = getTestScheduleState(test);
+
+              return (
+                <div
+                  key={test.id}
+                  className={`border rounded-2xl p-5 flex flex-col justify-between transition-all shadow-lg relative overflow-hidden ${
+                    schedState.isUpcoming
+                      ? 'bg-slate-900/90 border-amber-500/40 hover:border-amber-500/70'
+                      : 'bg-slate-900 border-slate-800 hover:border-emerald-500/50'
+                  }`}
+                >
+                  <div className="space-y-3">
+                    {/* Top Badges */}
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-[10px] px-2.5 py-0.5 rounded-full bg-slate-800 text-emerald-400 border border-slate-700 font-medium">
+                        {test.subject} &bull; {test.cadre_tier}
+                      </span>
+
+                      {schedState.isUpcoming ? (
+                        <span className="text-[10px] px-2.5 py-0.5 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/40 font-bold flex items-center gap-1">
+                          <Clock className="w-3 h-3 text-amber-400 animate-spin" />
+                          আপকামিং
+                        </span>
+                      ) : (
+                        <span className="text-[10px] px-2.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 font-bold flex items-center gap-1">
+                          <Zap className="w-3 h-3 text-amber-300" />
+                          লাইভ পরীক্ষা
+                        </span>
+                      )}
+                    </div>
+
+                    {/* Title & Subtitle */}
+                    <div>
+                      <h3 className="text-base font-bold text-white font-serif leading-snug">
+                        {test.title}
+                      </h3>
+                      {test.subtitle && (
+                        <p className="text-xs text-slate-400 mt-1 line-clamp-2">
+                          {test.subtitle}
+                        </p>
+                      )}
+                    </div>
+
+                    {/* Upcoming Launch Notice & Live Countdown Timer */}
+                    {schedState.isUpcoming && test.scheduled_at && (
+                      <div className="bg-amber-950/40 border border-amber-500/30 p-3 rounded-xl space-y-2">
+                        <div className="text-[11px] text-amber-200 flex items-center justify-between">
+                          <span className="font-medium flex items-center gap-1">
+                            <Calendar className="w-3.5 h-3.5 text-amber-400" />
+                            পরীক্ষা শুরু:
+                          </span>
+                          <span className="font-bold">{formatBengaliDateTime(test.scheduled_at)}</span>
+                        </div>
+                        <CountdownTimer targetDate={test.scheduled_at} />
+                      </div>
+                    )}
+
+                    {/* Metrics Meta (Questions, Duration, Total Marks) */}
+                    <div className="grid grid-cols-3 gap-2 pt-2 border-t border-slate-800/80 text-[11px] text-slate-300 font-mono">
+                      <div className="flex items-center gap-1">
+                        <Clock className="w-3.5 h-3.5 text-slate-400" />
+                        <span>{toBengaliDigits(test.duration_minutes)} মিনিট</span>
+                      </div>
+                      <div className="flex items-center gap-1">
+                        <Award className="w-3.5 h-3.5 text-slate-400" />
+                        <span>{toBengaliDigits(test.total_marks)} মার্কস</span>
+                      </div>
+                      <div className="flex items-center gap-1 justify-end">
+                        <span className="text-emerald-400 font-bold">{toBengaliDigits(qCount)}টি MCQ</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Student Start Exam Action */}
+                  <div className="pt-4 mt-4 border-t border-slate-800/80">
+                    {schedState.isUpcoming ? (
+                      <button
+                        disabled
+                        className="w-full py-2.5 rounded-xl bg-slate-800/90 text-slate-400 border border-slate-700 font-semibold text-xs flex items-center justify-center gap-2 cursor-not-allowed opacity-80"
+                      >
+                        <Lock className="w-4 h-4 text-amber-400" />
+                        <span>নির্ধারিত সময়ে উন্মুক্ত হবে</span>
+                      </button>
+                    ) : (
+                      <button
+                        onClick={() => handleStartLiveExam(test)}
+                        className="w-full py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs shadow-lg shadow-emerald-950/80 transition-all active:scale-95 flex items-center justify-center gap-2"
+                      >
+                        <Play className="w-4 h-4 fill-white" />
+                        <span>পরীক্ষা শুরু করুন (Start Exam)</span>
+                      </button>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+
+          {studentAppVisibleTests.length === 0 && (
+            <div className="text-center py-16 bg-slate-900 border border-slate-800 rounded-2xl text-slate-400 text-sm space-y-2">
+              <Smartphone className="w-12 h-12 mx-auto text-slate-600" />
+              <p className="font-semibold text-slate-300">শিক্ষার্থী অ্যাপে দেখানোর মতো কোনো পরীক্ষা পাওয়া যায়নি।</p>
+              <p className="text-xs text-slate-500">
+                ড্রাফট পরীক্ষাগুলো শিক্ষার্থী অ্যাপে হাইড থাকে। অ্যাডমিন প্যানেল থেকে পাবলিশ করুন।
+              </p>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ========================================================================= */}
       {/* CREATE / EDIT MODEL TEST MODAL */}
+      {/* ========================================================================= */}
       {isModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm animate-in fade-in">
           <div className="bg-slate-900 border border-slate-800 text-slate-100 rounded-2xl max-w-3xl w-full p-6 shadow-2xl relative max-h-[90vh] overflow-y-auto">
@@ -509,12 +1012,12 @@ export const ModelTestsTab: React.FC<Props> = ({
 
               <div className="grid grid-cols-3 gap-3">
                 <div>
-                  <label className="block text-slate-300 font-medium mb-1">সময় (মিনিট)</label>
+                  <label className="block text-slate-300 font-medium mb-1">সময় (মিনিট)</label>
                   <input
                     type="number"
                     value={formData.duration_minutes}
                     onChange={(e) => setFormData({ ...formData, duration_minutes: Number(e.target.value) })}
-                    className="w-full bg-slate-950 border border-slate-800 rounded-xl p-2.5 text-slate-100 focus:border-emerald-500 focus:outline-none"
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl p-2.5 text-slate-100 focus:border-emerald-500 focus:outline-none font-mono"
                   />
                 </div>
 
@@ -524,7 +1027,7 @@ export const ModelTestsTab: React.FC<Props> = ({
                     type="number"
                     value={formData.total_marks}
                     onChange={(e) => setFormData({ ...formData, total_marks: Number(e.target.value) })}
-                    className="w-full bg-slate-950 border border-slate-800 rounded-xl p-2.5 text-slate-100 focus:border-emerald-500 focus:outline-none"
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl p-2.5 text-slate-100 focus:border-emerald-500 focus:outline-none font-mono"
                   />
                 </div>
 
@@ -534,58 +1037,127 @@ export const ModelTestsTab: React.FC<Props> = ({
                     type="number"
                     value={formData.pass_mark}
                     onChange={(e) => setFormData({ ...formData, pass_mark: Number(e.target.value) })}
-                    className="w-full bg-slate-950 border border-slate-800 rounded-xl p-2.5 text-slate-100 focus:border-emerald-500 focus:outline-none"
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl p-2.5 text-slate-100 focus:border-emerald-500 focus:outline-none font-mono"
                   />
                 </div>
               </div>
 
-              {/* Toggles & Publishing Options */}
-              <div className="flex flex-wrap items-center justify-between gap-4 p-3 bg-slate-950 rounded-xl border border-slate-800">
-                <div className="flex flex-wrap items-center gap-5">
-                  <label className="flex items-center gap-2 cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={formData.negative_marking}
-                      onChange={(e) => setFormData({ ...formData, negative_marking: e.target.checked })}
-                      className="rounded border-slate-700 bg-slate-900 text-emerald-500 focus:ring-emerald-500"
-                    />
-                    <span>নেগেটিভ মার্কিং (0.25 কাটা যাবে)</span>
-                  </label>
+              {/* Toggles & Draft/Publish Status */}
+              <div className="space-y-3 p-4 bg-slate-950 rounded-xl border border-slate-800">
+                <div className="flex flex-wrap items-center justify-between gap-4">
+                  <div className="flex flex-wrap items-center gap-5">
+                    <label className="flex items-center gap-2 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={formData.negative_marking}
+                        onChange={(e) => setFormData({ ...formData, negative_marking: e.target.checked })}
+                        className="rounded border-slate-700 bg-slate-900 text-emerald-500 focus:ring-emerald-500"
+                      />
+                      <span>নেগেটিভ মার্কিং (0.25 কাটা যাবে)</span>
+                    </label>
 
-                  <label className="flex items-center gap-2 cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={formData.is_premium}
-                      onChange={(e) => setFormData({ ...formData, is_premium: e.target.checked })}
-                      className="rounded border-slate-700 bg-slate-900 text-amber-500 focus:ring-amber-500"
-                    />
-                    <span className="text-amber-400 font-medium">ভিআইপি প্রিমিয়াম মেম্বার ওনলি</span>
-                  </label>
+                    <label className="flex items-center gap-2 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={formData.is_premium}
+                        onChange={(e) => setFormData({ ...formData, is_premium: e.target.checked })}
+                        className="rounded border-slate-700 bg-slate-900 text-amber-500 focus:ring-amber-500"
+                      />
+                      <span className="text-amber-400 font-medium">ভিআইপি প্রিমিয়াম মেম্বার ওনলি</span>
+                    </label>
+                  </div>
+
+                  {/* Draft vs Published Selector */}
+                  <div className="flex items-center gap-1 bg-slate-900 p-1 rounded-lg border border-slate-800">
+                    <button
+                      type="button"
+                      onClick={() => setFormData({ ...formData, is_published: false })}
+                      className={`px-3 py-1 rounded-md text-xs font-semibold transition-all flex items-center gap-1 ${
+                        !formData.is_published
+                          ? 'bg-amber-950/80 text-amber-300 border border-amber-800 shadow'
+                          : 'text-slate-400 hover:text-white'
+                      }`}
+                    >
+                      <FileEdit className="w-3.5 h-3.5" />
+                      <span>ড্রাফট (App Hidden)</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setFormData({ ...formData, is_published: true })}
+                      className={`px-3 py-1 rounded-md text-xs font-semibold transition-all flex items-center gap-1 ${
+                        formData.is_published
+                          ? 'bg-emerald-600 text-white shadow-md'
+                          : 'text-slate-400 hover:text-white'
+                      }`}
+                    >
+                      <Globe className="w-3.5 h-3.5" />
+                      <span>পাবলিশড (App Visible)</span>
+                    </button>
+                  </div>
                 </div>
 
-                <div className="flex items-center gap-1.5 bg-slate-900 p-1 rounded-lg border border-slate-800">
-                  <button
-                    type="button"
-                    onClick={() => setFormData({ ...formData, is_published: false })}
-                    className={`px-3 py-1 rounded-md text-xs font-semibold transition-all ${
-                      !formData.is_published
-                        ? 'bg-amber-950/80 text-amber-300 border border-amber-800 shadow'
-                        : 'text-slate-400 hover:text-white'
-                    }`}
-                  >
-                    ড্রাফট (Draft)
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setFormData({ ...formData, is_published: true })}
-                    className={`px-3 py-1 rounded-md text-xs font-semibold transition-all ${
-                      formData.is_published
-                        ? 'bg-emerald-600 text-white shadow-md'
-                        : 'text-slate-400 hover:text-white'
-                    }`}
-                  >
-                    পাবলিশড (Live)
-                  </button>
+                {/* SCHEDULED LAUNCH SETTINGS */}
+                <div className="pt-3 border-t border-slate-800/80 space-y-3">
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={isScheduled}
+                      onChange={(e) => {
+                        setIsScheduled(e.target.checked);
+                        if (!e.target.checked) {
+                          setFormData((prev) => ({ ...prev, scheduled_at: '' }));
+                        }
+                      }}
+                      className="rounded border-slate-700 bg-slate-900 text-emerald-500 focus:ring-emerald-500"
+                    />
+                    <span className="font-semibold text-white flex items-center gap-1.5">
+                      <Calendar className="w-4 h-4 text-amber-400" />
+                      অগ্রীম মডেল টেস্ট শিডিউল লঞ্চ (Set Future Release Date & Time)
+                    </span>
+                  </label>
+
+                  {isScheduled && (
+                    <div className="bg-slate-900 p-3.5 rounded-xl border border-slate-800 space-y-3 animate-in fade-in">
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        <div>
+                          <label className="block text-slate-300 font-medium mb-1">
+                            প্রকাশের তারিখ ও সময় (Scheduled Date & Time) *
+                          </label>
+                          <input
+                            type="datetime-local"
+                            value={formData.scheduled_at}
+                            onChange={(e) => setFormData({ ...formData, scheduled_at: e.target.value })}
+                            className="w-full bg-slate-950 border border-slate-800 rounded-xl p-2 text-slate-100 focus:border-emerald-500 focus:outline-none font-mono"
+                            required={isScheduled}
+                          />
+                        </div>
+
+                        <div className="flex flex-col justify-end">
+                          <label className="flex items-center gap-2 cursor-pointer p-2 rounded-xl bg-slate-950 border border-slate-800/80">
+                            <input
+                              type="checkbox"
+                              checked={formData.show_as_upcoming}
+                              onChange={(e) => setFormData({ ...formData, show_as_upcoming: e.target.checked })}
+                              className="rounded border-slate-700 bg-slate-900 text-emerald-500 focus:ring-emerald-500"
+                            />
+                            <div className="text-xs">
+                              <span className="font-bold text-emerald-300 block">
+                                অ্যাপে 'আপকামিং' হিসেবে কাউন্টডাউন দেখাবে?
+                              </span>
+                              <span className="text-[10px] text-slate-400 block">
+                                (নির্ধারিত সময়ের পূর্বে অ্যাপে কাউন্টডাউন টাইমার দেখাবে)
+                              </span>
+                            </div>
+                          </label>
+                        </div>
+                      </div>
+
+                      <p className="text-[11px] text-slate-400 leading-relaxed bg-slate-950/60 p-2.5 rounded-lg border border-slate-800/60">
+                        <AlertCircle className="w-3.5 h-3.5 text-amber-400 inline mr-1" />
+                        <strong>নোট:</strong> সময় আসার পূর্বে ড্রাফট করে রাখলে পরীক্ষাটি অ্যাপে দেখাবে না। পাবলিশড রাখা অবস্থায় অগ্রীম সময় দিলে অটোমেটিক নির্দিষ্ট সময়ে শিক্ষার্থীদের জন্য পরীক্ষাটি আনলক হয়ে যাবে।
+                      </p>
+                    </div>
+                  )}
                 </div>
               </div>
 
@@ -599,7 +1171,7 @@ export const ModelTestsTab: React.FC<Props> = ({
                 </div>
 
                 <div className="max-h-60 overflow-y-auto space-y-2 pr-1 scrollbar-thin scrollbar-thumb-slate-800">
-                  {questions.map((q, idx) => {
+                  {questions.map((q) => {
                     const isSelected = formData.question_ids.includes(q.id);
                     const selectedIdx = formData.question_ids.indexOf(q.id);
 
@@ -660,6 +1232,7 @@ export const ModelTestsTab: React.FC<Props> = ({
                 </div>
               </div>
 
+              {/* Form Action Buttons */}
               <div className="flex flex-col sm:flex-row items-center justify-between gap-3 pt-4 border-t border-slate-800">
                 <button
                   type="button"
@@ -676,7 +1249,7 @@ export const ModelTestsTab: React.FC<Props> = ({
                     className="flex-1 sm:flex-initial px-4 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-amber-300 border border-amber-500/30 font-semibold text-xs transition-all shadow-md active:scale-95 flex items-center justify-center gap-1.5"
                   >
                     <FileEdit className="w-4 h-4 text-amber-400" />
-                    <span>ড্রাফট সেভ করুন</span>
+                    <span>ড্রাফট সেভ করুন (App Hidden)</span>
                   </button>
 
                   <button
@@ -706,16 +1279,21 @@ export const ModelTestsTab: React.FC<Props> = ({
             </button>
 
             <div className="border-b border-slate-800 pb-3">
-              <span className="text-xs px-2.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 font-medium">
-                {previewTest.subject}
-              </span>
+              <div className="flex items-center gap-2">
+                <span className="text-xs px-2.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 font-medium">
+                  {previewTest.subject}
+                </span>
+                <span className="text-xs px-2.5 py-0.5 rounded-full bg-slate-800 text-slate-300 font-mono">
+                  {toBengaliDigits(previewTest.question_ids?.length || 0)}টি প্রশ্ন &bull; {toBengaliDigits(previewTest.duration_minutes)} মিনিট
+                </span>
+              </div>
               <h3 className="text-xl font-bold text-white font-serif mt-2">{previewTest.title}</h3>
-              <p className="text-xs text-slate-400 mt-0.5">{previewTest.subtitle}</p>
+              {previewTest.subtitle && <p className="text-xs text-slate-400 mt-0.5">{previewTest.subtitle}</p>}
             </div>
 
             <div className="space-y-4">
               <h4 className="font-semibold text-xs text-slate-300 uppercase tracking-wider">
-                পরীক্ষার প্রশ্নসমূহ ({previewTest.question_ids?.length || 0}টি MCQ):
+                পরীক্ষার অন্তর্ভুক্ত প্রশ্নসমূহ ({toBengaliDigits(previewTest.question_ids?.length || 0)}টি MCQ):
               </h4>
 
               {previewTest.question_ids?.map((qId, idx) => {
@@ -724,7 +1302,7 @@ export const ModelTestsTab: React.FC<Props> = ({
                 return (
                   <div key={qId} className="bg-slate-950 border border-slate-800 p-4 rounded-xl text-xs space-y-2">
                     <div className="flex items-start justify-between gap-2">
-                      <span className="font-bold text-emerald-400">প্রশ্ন {idx + 1}.</span>
+                      <span className="font-bold text-emerald-400">প্রশ্ন {toBengaliDigits(idx + 1)}.</span>
                       <span className="text-[10px] text-slate-500 font-mono">{q.difficulty}</span>
                     </div>
 
@@ -751,10 +1329,12 @@ export const ModelTestsTab: React.FC<Props> = ({
                       ))}
                     </div>
 
-                    <div className="mt-2 p-2.5 bg-slate-900 rounded-lg text-[11px] text-slate-300 border border-slate-800/80">
-                      <span className="font-semibold text-emerald-400">ব্যাখ্যা: </span>
-                      {q.explanation}
-                    </div>
+                    {q.explanation && (
+                      <div className="mt-2 p-2.5 bg-slate-900 rounded-lg text-[11px] text-slate-300 border border-slate-800/80">
+                        <span className="font-semibold text-emerald-400">ব্যাখ্যা: </span>
+                        {q.explanation}
+                      </div>
+                    )}
                   </div>
                 );
               })}
@@ -781,8 +1361,8 @@ export const ModelTestsTab: React.FC<Props> = ({
                   <div className="bg-slate-950 border border-slate-800 px-3 py-1.5 rounded-xl font-mono text-xs sm:text-sm font-bold text-amber-400 flex items-center gap-1.5 shadow-inner">
                     <Clock className="w-4 h-4 text-amber-400 animate-pulse" />
                     <span>
-                      {Math.floor(examTimeLeft / 60)}:
-                      {String(examTimeLeft % 60).padStart(2, '0')}
+                      {toBengaliDigits(Math.floor(examTimeLeft / 60))}:
+                      {toBengaliDigits(String(examTimeLeft % 60).padStart(2, '0'))}
                     </span>
                   </div>
                 )}
@@ -797,13 +1377,12 @@ export const ModelTestsTab: React.FC<Props> = ({
 
             {/* Main Content Area */}
             <div className="flex-1 overflow-y-auto space-y-4 pr-1 scrollbar-thin scrollbar-thumb-slate-800">
-              {/* Question List or Result Screen */}
               {!examSubmitted ? (
                 <div className="space-y-4">
                   {/* Progress Tracker */}
                   <div className="bg-slate-950 p-3 rounded-xl border border-slate-800/80 flex items-center justify-between text-xs text-slate-300 font-mono">
                     <span>
-                      উত্তর প্রদান করেছেন: <strong className="text-emerald-400">{Object.keys(userAnswers).length}</strong> / {activeExam.question_ids?.length || 0}
+                      উত্তর প্রদান করেছেন: <strong className="text-emerald-400">{toBengaliDigits(Object.keys(userAnswers).length)}</strong> / {toBengaliDigits(activeExam.question_ids?.length || 0)}
                     </span>
                     <span className="text-[11px] text-slate-400">
                       নেগেটিভ মার্কিং: {activeExam.negative_marking ? 'সক্রিয় (-0.25)' : 'নিষ্ক্রিয়'}
@@ -819,7 +1398,7 @@ export const ModelTestsTab: React.FC<Props> = ({
                       <div key={qId} className="bg-slate-950 border border-slate-800/80 p-4 rounded-xl text-xs space-y-3">
                         <div className="flex items-start justify-between gap-2">
                           <span className="font-bold text-emerald-400 text-sm">
-                            প্রশ্ন {qIdx + 1}.
+                            প্রশ্ন {toBengaliDigits(qIdx + 1)}.
                           </span>
                           <span className="text-[10px] text-slate-400 font-mono">১ মার্ক</span>
                         </div>
@@ -900,25 +1479,25 @@ export const ModelTestsTab: React.FC<Props> = ({
                             {isPassed ? 'অভিনন্দন! আপনি পরীক্ষায় উত্তীর্ণ হয়েছেন!' : 'দুঃখিত! আরও অনুশিলনের প্রয়োজন।'}
                           </h4>
                           <p className="text-xs text-slate-300">
-                            পাস মার্কস: {activeExam.pass_mark} | মোট মার্কস: {activeExam.total_marks}
+                            পাস মার্কস: {toBengaliDigits(activeExam.pass_mark)} | মোট মার্কস: {toBengaliDigits(activeExam.total_marks)}
                           </p>
 
                           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 pt-4 border-t border-slate-800/60 font-mono text-xs">
                             <div className="bg-slate-900/80 p-3 rounded-xl border border-slate-800">
                               <span className="text-[10px] text-slate-400 block">প্রাপ্ত নম্বর</span>
-                              <strong className="text-base text-emerald-400">{obtainedMarks.toFixed(2)}</strong>
+                              <strong className="text-base text-emerald-400">{toBengaliDigits(obtainedMarks.toFixed(2))}</strong>
                             </div>
                             <div className="bg-slate-900/80 p-3 rounded-xl border border-slate-800">
                               <span className="text-[10px] text-slate-400 block">সঠিক উত্তর</span>
-                              <strong className="text-base text-emerald-300">{correctCount}টি</strong>
+                              <strong className="text-base text-emerald-300">{toBengaliDigits(correctCount)}টি</strong>
                             </div>
                             <div className="bg-slate-900/80 p-3 rounded-xl border border-slate-800">
                               <span className="text-[10px] text-slate-400 block">ভুল উত্তর (-0.25)</span>
-                              <strong className="text-base text-rose-400">{incorrectCount}টি</strong>
+                              <strong className="text-base text-rose-400">{toBengaliDigits(incorrectCount)}টি</strong>
                             </div>
                             <div className="bg-slate-900/80 p-3 rounded-xl border border-slate-800">
                               <span className="text-[10px] text-slate-400 block">অনুত্তরিত</span>
-                              <strong className="text-base text-slate-400">{totalQ - (correctCount + incorrectCount)}টি</strong>
+                              <strong className="text-base text-slate-400">{toBengaliDigits(totalQ - (correctCount + incorrectCount))}টি</strong>
                             </div>
                           </div>
                         </div>
@@ -947,7 +1526,7 @@ export const ModelTestsTab: React.FC<Props> = ({
                                 }`}
                               >
                                 <div className="flex items-center justify-between">
-                                  <span className="font-bold text-slate-200">প্রশ্ন {idx + 1}. {q.question_bn}</span>
+                                  <span className="font-bold text-slate-200">প্রশ্ন {toBengaliDigits(idx + 1)}. {q.question_bn}</span>
                                   {userAns !== undefined && (
                                     <span className={`text-[10px] px-2 py-0.5 rounded font-mono font-bold ${
                                       isCorrect ? 'bg-emerald-900 text-emerald-300' : 'bg-rose-900 text-rose-300'

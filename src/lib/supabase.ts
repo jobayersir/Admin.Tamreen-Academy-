@@ -408,6 +408,8 @@ export async function saveModelTest(test: Omit<ModelTest, 'id' | 'created_at'> &
     negative_marking: Boolean(test.negative_marking),
     is_premium: Boolean(test.is_premium),
     is_published: Boolean(test.is_published),
+    scheduled_at: test.scheduled_at || undefined,
+    show_as_upcoming: test.show_as_upcoming !== undefined ? Boolean(test.show_as_upcoming) : false,
     question_ids: Array.isArray(test.question_ids) ? test.question_ids : [],
     created_at: new Date().toISOString()
   } as ModelTest;

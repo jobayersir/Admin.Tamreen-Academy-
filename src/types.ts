@@ -52,6 +52,8 @@ export interface ModelTest {
   negative_marking: boolean;
   is_premium: boolean;
   is_published: boolean;
+  scheduled_at?: string; // ISO / local datetime string e.g., "2026-08-15T10:00"
+  show_as_upcoming?: boolean; // Show in app with countdown if scheduled in future
   question_ids: string[];
   created_at: string;
 }
