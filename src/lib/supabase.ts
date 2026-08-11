@@ -14,6 +14,16 @@ let _supabaseClient: SupabaseClient | null = null;
 let _activeUrl = '';
 let _activeKey = '';
 
+// Custom fetch wrapper with AbortController timeout for mobile data (4G/3G) & Wi-Fi stability
+const fetchWithMobileTimeout = (input: RequestInfo | URL, init?: RequestInit) => {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 6000);
+  const signal = init?.signal ? init.signal : controller.signal;
+
+  return fetch(input, { ...init, signal })
+    .finally(() => clearTimeout(timeoutId));
+};
+
 export function getSupabase(): SupabaseClient | null {
   const metaEnv = (import.meta as any).env || {};
   let url = '';
@@ -37,7 +47,16 @@ export function getSupabase(): SupabaseClient | null {
 
   if (!_supabaseClient || _activeUrl !== url || _activeKey !== key) {
     try {
-      _supabaseClient = createClient(url, key);
+      _supabaseClient = createClient(url, key, {
+        auth: {
+          persistSession: true,
+          autoRefreshToken: true,
+          detectSessionInUrl: false
+        },
+        global: {
+          fetch: fetchWithMobileTimeout
+        }
+      });
       _activeUrl = url;
       _activeKey = key;
     } catch {
@@ -243,13 +262,22 @@ async function safeSupabaseSave<T extends { id: string }>(
       let res: { data: any[] | null; error: any };
 
       if (isEdit) {
-        res = await client.from(tableName).update(activePayload).eq('id', validId).select();
+        res = await withTimeout(
+          client.from(tableName).update(activePayload).eq('id', validId).select(),
+          5000
+        );
         // If row did not exist in DB yet during edit, try inserting
         if (!res.error && (!res.data || res.data.length === 0)) {
-          res = await client.from(tableName).insert([activePayload]).select();
+          res = await withTimeout(
+            client.from(tableName).insert([activePayload]).select(),
+            5000
+          );
         }
       } else {
-        res = await client.from(tableName).insert([activePayload]).select();
+        res = await withTimeout(
+          client.from(tableName).insert([activePayload]).select(),
+          5000
+        );
       }
 
       if (!res.error) {

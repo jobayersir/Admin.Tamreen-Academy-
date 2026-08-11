@@ -160,6 +160,22 @@ const AdminAppContent: React.FC = () => {
 
   useEffect(() => {
     loadAllData();
+
+    const handleNetworkChange = () => {
+      if (navigator.onLine) {
+        loadAllData();
+      }
+    };
+
+    window.addEventListener('online', handleNetworkChange);
+    window.addEventListener('offline', handleNetworkChange);
+    window.addEventListener('focus', handleNetworkChange);
+
+    return () => {
+      window.removeEventListener('online', handleNetworkChange);
+      window.removeEventListener('offline', handleNetworkChange);
+      window.removeEventListener('focus', handleNetworkChange);
+    };
   }, []);
 
   // Sync dark mode class on root body
