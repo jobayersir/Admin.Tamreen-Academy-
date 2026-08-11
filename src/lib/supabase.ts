@@ -217,6 +217,57 @@ export function generateUuid(): string {
   });
 }
 
+export function isValidUuid(id?: string): boolean {
+  if (!id) return false;
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id);
+}
+
+// Helper to execute safe Supabase upsert/save with fallback for legacy IDs
+async function safeSupabaseSave<T extends { id: string }>(
+  tableName: string,
+  record: T,
+  originalId?: string
+): Promise<T> {
+  const client = getSupabase();
+  if (!client) return record;
+
+  const validId = isValidUuid(record.id) ? record.id : generateUuid();
+  const payload = { ...record, id: validId };
+  const isEdit = Boolean(originalId && isValidUuid(originalId));
+
+  if (isEdit) {
+    const res = await client.from(tableName).update(payload).eq('id', validId).select();
+    if (res.error) {
+      if (res.error.code === '22P02' || res.error.message.includes('uuid')) {
+        console.warn(`[Supabase Warn] 22P02 on ${tableName} update, retrying as insert with new UUID...`);
+        const freshPayload = { ...payload, id: generateUuid() };
+        const ins = await client.from(tableName).insert([freshPayload]).select();
+        if (ins.error) throw new Error(`Supabase ${tableName} সেভ ব্যর্থ: ${ins.error.message}`);
+        return (ins.data && ins.data[0]) ? (ins.data[0] as T) : freshPayload;
+      }
+      throw new Error(`Supabase-এ আপডেট ব্যর্থ: ${res.error.message}`);
+    }
+    if (res.data && res.data.length > 0) return res.data[0] as T;
+
+    // Row did not exist in DB yet, insert
+    const ins = await client.from(tableName).insert([payload]).select();
+    if (ins.error) throw new Error(`Supabase-এ ইনসার্ট ব্যর্থ: ${ins.error.message}`);
+    return (ins.data && ins.data[0]) ? (ins.data[0] as T) : payload;
+  } else {
+    const res = await client.from(tableName).insert([payload]).select();
+    if (res.error) {
+      if (res.error.code === '22P02' || res.error.message.includes('uuid')) {
+        const freshPayload = { ...payload, id: generateUuid() };
+        const ins = await client.from(tableName).insert([freshPayload]).select();
+        if (ins.error) throw new Error(`Supabase-এ সেভ ব্যর্থ: ${ins.error.message}`);
+        return (ins.data && ins.data[0]) ? (ins.data[0] as T) : freshPayload;
+      }
+      throw new Error(`Supabase-এ সেভ ব্যর্থ: ${res.error.message}`);
+    }
+    return (res.data && res.data[0]) ? (res.data[0] as T) : payload;
+  }
+}
+
 // ==================== QUESTIONS API ====================
 export async function getQuestions(): Promise<Question[]> {
   const localList = getLocal<Question>(STORAGE_KEYS.QUESTIONS, INITIAL_QUESTIONS);
@@ -240,8 +291,8 @@ export async function getQuestions(): Promise<Question[]> {
 }
 
 export async function saveQuestion(q: Omit<Question, 'id' | 'created_at'> & { id?: string }): Promise<Question> {
-  const isEdit = Boolean(q.id);
-  const qId = q.id || generateUuid();
+  const originalId = q.id;
+  const qId = (originalId && isValidUuid(originalId)) ? originalId : generateUuid();
 
   const newQuestion: Question = {
     ...q,
@@ -259,38 +310,18 @@ export async function saveQuestion(q: Omit<Question, 'id' | 'created_at'> & { id
     created_at: new Date().toISOString()
   } as Question;
 
-  const client = getSupabase();
-  let savedRecord = newQuestion;
-
-  if (client) {
-    console.log('[Supabase API] Saving question record...', newQuestion);
-    if (isEdit) {
-      const { data, error } = await client.from('questions').update(newQuestion).eq('id', newQuestion.id).select();
-      if (error) {
-        console.error('[Supabase Error] Update question error:', error);
-        throw new Error(`Supabase-এ প্রশ্ন সেভ ব্যর্থ: ${error.message} (Code: ${error.code || 'UNKNOWN'})`);
-      }
-      if (data && data.length > 0) savedRecord = data[0] as Question;
-    } else {
-      const { data, error } = await client.from('questions').insert([newQuestion]).select();
-      if (error) {
-        console.error('[Supabase Error] Insert question error:', error);
-        throw new Error(`Supabase-এ প্রশ্ন ইনসার্ট ব্যর্থ: ${error.message} (Code: ${error.code || 'UNKNOWN'})`);
-      }
-      if (data && data.length > 0) savedRecord = data[0] as Question;
-    }
-  }
+  const savedRecord = await safeSupabaseSave<Question>('questions', newQuestion, originalId);
 
   const list = getLocal<Question>(STORAGE_KEYS.QUESTIONS, INITIAL_QUESTIONS);
-  if (isEdit) {
-    const idx = list.findIndex(item => item.id === savedRecord.id);
-    if (idx !== -1) list[idx] = savedRecord;
-    else list.unshift(savedRecord);
-  } else {
-    list.unshift(savedRecord);
+  let updatedList = list;
+  if (originalId && originalId !== savedRecord.id) {
+    updatedList = updatedList.filter(item => item.id !== originalId);
   }
-  setLocal(STORAGE_KEYS.QUESTIONS, list);
+  const idx = updatedList.findIndex(item => item.id === savedRecord.id);
+  if (idx !== -1) updatedList[idx] = savedRecord;
+  else updatedList.unshift(savedRecord);
 
+  setLocal(STORAGE_KEYS.QUESTIONS, updatedList);
   return savedRecord;
 }
 
@@ -323,9 +354,9 @@ export async function bulkSaveQuestions(qs: Omit<Question, 'id' | 'created_at'>[
 
 export async function deleteQuestion(id: string): Promise<boolean> {
   const client = getSupabase();
-  if (client) {
+  if (client && isValidUuid(id)) {
     const { error } = await client.from('questions').delete().eq('id', id);
-    if (error) {
+    if (error && error.code !== '22P02') {
       console.error('[Supabase Error] Delete question error:', error);
       throw new Error(`Supabase-এ প্রশ্ন ডিলিট ব্যর্থ: ${error.message}`);
     }
@@ -361,8 +392,8 @@ export async function getModelTests(): Promise<ModelTest[]> {
 }
 
 export async function saveModelTest(test: Omit<ModelTest, 'id' | 'created_at'> & { id?: string }): Promise<ModelTest> {
-  const isEdit = Boolean(test.id);
-  const testId = test.id || generateUuid();
+  const originalId = test.id;
+  const testId = (originalId && isValidUuid(originalId)) ? originalId : generateUuid();
 
   const modelTest: ModelTest = {
     ...test,
@@ -381,62 +412,28 @@ export async function saveModelTest(test: Omit<ModelTest, 'id' | 'created_at'> &
     created_at: new Date().toISOString()
   } as ModelTest;
 
-  const client = getSupabase();
-  let savedRecord = modelTest;
-
-  if (client) {
-    console.log('[Supabase API] Saving model_test record:', modelTest);
-    if (isEdit) {
-      const { data, error } = await client
-        .from('model_tests')
-        .update(modelTest)
-        .eq('id', modelTest.id)
-        .select();
-
-      if (error) {
-        console.error('[Supabase Error] Update model_tests error:', error);
-        throw new Error(`Supabase-এ মডেল টেস্ট আপডেট ব্যর্থ হয়েছে: ${error.message} (Code: ${error.code || 'UNKNOWN'})`);
-      }
-      if (data && data.length > 0) {
-        savedRecord = data[0] as ModelTest;
-      }
-    } else {
-      const { data, error } = await client
-        .from('model_tests')
-        .insert([modelTest])
-        .select();
-
-      if (error) {
-        console.error('[Supabase Error] Insert model_tests error:', error);
-        throw new Error(`Supabase-এ মডেল টেস্ট সংরক্ষণ ব্যর্থ হয়েছে: ${error.message} (Code: ${error.code || 'UNKNOWN'})`);
-      }
-      if (data && data.length > 0) {
-        savedRecord = data[0] as ModelTest;
-      }
-    }
-    console.log('[Supabase API Success] Model test committed to PostgreSQL database:', savedRecord);
-  }
+  const savedRecord = await safeSupabaseSave<ModelTest>('model_tests', modelTest, originalId);
 
   // Update local storage cache
   const list = getLocal<ModelTest>(STORAGE_KEYS.MODEL_TESTS, INITIAL_MODEL_TESTS);
-  if (isEdit) {
-    const idx = list.findIndex(m => m.id === savedRecord.id);
-    if (idx !== -1) list[idx] = savedRecord;
-    else list.unshift(savedRecord);
-  } else {
-    list.unshift(savedRecord);
+  let updatedList = list;
+  if (originalId && originalId !== savedRecord.id) {
+    updatedList = updatedList.filter(m => m.id !== originalId);
   }
-  setLocal(STORAGE_KEYS.MODEL_TESTS, list);
+  const idx = updatedList.findIndex(m => m.id === savedRecord.id);
+  if (idx !== -1) updatedList[idx] = savedRecord;
+  else updatedList.unshift(savedRecord);
 
+  setLocal(STORAGE_KEYS.MODEL_TESTS, updatedList);
   return savedRecord;
 }
 
 export async function deleteModelTest(id: string): Promise<boolean> {
   const client = getSupabase();
-  if (client) {
+  if (client && isValidUuid(id)) {
     console.log('[Supabase API] Deleting model_test:', id);
     const { error } = await client.from('model_tests').delete().eq('id', id);
-    if (error) {
+    if (error && error.code !== '22P02') {
       console.error('[Supabase Error] Delete model_test error:', error);
       throw new Error(`Supabase-এ মডেল টেস্ট মুছতে ব্যর্থ: ${error.message}`);
     }
@@ -470,8 +467,8 @@ export async function getCourses(): Promise<Course[]> {
 }
 
 export async function saveCourse(course: Omit<Course, 'id' | 'created_at'> & { id?: string }): Promise<Course> {
-  const isEdit = Boolean(course.id);
-  const courseId = course.id || generateUuid();
+  const originalId = course.id;
+  const courseId = (originalId && isValidUuid(originalId)) ? originalId : generateUuid();
 
   const fullCourse: Course = {
     ...course,
@@ -490,46 +487,26 @@ export async function saveCourse(course: Omit<Course, 'id' | 'created_at'> & { i
     created_at: new Date().toISOString()
   } as Course;
 
-  const client = getSupabase();
-  let savedRecord = fullCourse;
-
-  if (client) {
-    console.log('[Supabase API] Saving course record...', fullCourse);
-    if (isEdit) {
-      const { data, error } = await client.from('courses').update(fullCourse).eq('id', fullCourse.id).select();
-      if (error) {
-        console.error('[Supabase Error] Update courses error:', error);
-        throw new Error(`Supabase-এ কোর্স আপডেট ব্যর্থ: ${error.message}`);
-      }
-      if (data && data.length > 0) savedRecord = data[0] as Course;
-    } else {
-      const { data, error } = await client.from('courses').insert([fullCourse]).select();
-      if (error) {
-        console.error('[Supabase Error] Insert courses error:', error);
-        throw new Error(`Supabase-এ কোর্স ইনসার্ট ব্যর্থ: ${error.message}`);
-      }
-      if (data && data.length > 0) savedRecord = data[0] as Course;
-    }
-  }
+  const savedRecord = await safeSupabaseSave<Course>('courses', fullCourse, originalId);
 
   const list = getLocal<Course>(STORAGE_KEYS.COURSES, INITIAL_COURSES);
-  if (isEdit) {
-    const idx = list.findIndex(c => c.id === savedRecord.id);
-    if (idx !== -1) list[idx] = savedRecord;
-    else list.unshift(savedRecord);
-  } else {
-    list.unshift(savedRecord);
+  let updatedList = list;
+  if (originalId && originalId !== savedRecord.id) {
+    updatedList = updatedList.filter(c => c.id !== originalId);
   }
-  setLocal(STORAGE_KEYS.COURSES, list);
+  const idx = updatedList.findIndex(c => c.id === savedRecord.id);
+  if (idx !== -1) updatedList[idx] = savedRecord;
+  else updatedList.unshift(savedRecord);
 
+  setLocal(STORAGE_KEYS.COURSES, updatedList);
   return savedRecord;
 }
 
 export async function deleteCourse(id: string): Promise<boolean> {
   const client = getSupabase();
-  if (client) {
+  if (client && isValidUuid(id)) {
     const { error } = await client.from('courses').delete().eq('id', id);
-    if (error) {
+    if (error && error.code !== '22P02') {
       console.error('[Supabase Error] Delete course error:', error);
       throw new Error(`Supabase-এ কোর্স ডিলিট ব্যর্থ: ${error.message}`);
     }
@@ -612,45 +589,41 @@ export async function getWrittenQuestions(): Promise<WrittenQuestion[]> {
 }
 
 export async function saveWrittenQuestion(wq: Omit<WrittenQuestion, 'id' | 'created_at'> & { id?: string }): Promise<WrittenQuestion> {
-  const isEdit = Boolean(wq.id);
+  const originalId = wq.id;
   const item: WrittenQuestion = {
     ...wq,
-    id: wq.id || generateUuid(),
+    id: (originalId && isValidUuid(originalId)) ? originalId : generateUuid(),
     created_at: new Date().toISOString()
   };
 
-  const client = getSupabase();
-  let savedRecord = item;
+  const savedRecord = await safeSupabaseSave<WrittenQuestion>('written_questions', item, originalId);
 
-  if (client) {
-    if (isEdit) {
-      const { data, error } = await client.from('written_questions').update(item).eq('id', item.id).select();
-      if (error) {
-        console.error('[Supabase Error] Update written question error:', error);
-        throw new Error(`Supabase-এ সেভ ব্যর্থ: ${error.message}`);
-      }
-      if (data && data.length > 0) savedRecord = data[0] as WrittenQuestion;
-    } else {
-      const { data, error } = await client.from('written_questions').insert([item]).select();
-      if (error) {
-        console.error('[Supabase Error] Insert written question error:', error);
-        throw new Error(`Supabase-এ ইনসার্ট ব্যর্থ: ${error.message}`);
-      }
-      if (data && data.length > 0) savedRecord = data[0] as WrittenQuestion;
+  const list = getLocal<WrittenQuestion>(STORAGE_KEYS.WRITTEN, INITIAL_WRITTEN_QUESTIONS);
+  let updatedList = list;
+  if (originalId && originalId !== savedRecord.id) {
+    updatedList = updatedList.filter(w => w.id !== originalId);
+  }
+  const idx = updatedList.findIndex(w => w.id === savedRecord.id);
+  if (idx !== -1) updatedList[idx] = savedRecord;
+  else updatedList.unshift(savedRecord);
+
+  setLocal(STORAGE_KEYS.WRITTEN, updatedList);
+  return savedRecord;
+}
+
+export async function deleteWrittenQuestion(id: string): Promise<boolean> {
+  const client = getSupabase();
+  if (client && isValidUuid(id)) {
+    const { error } = await client.from('written_questions').delete().eq('id', id);
+    if (error && error.code !== '22P02') {
+      console.error('[Supabase Error] Delete written question error:', error);
+      throw new Error(`Supabase-এ সেভড প্রশ্ন ডিলিট ব্যর্থ: ${error.message}`);
     }
   }
 
   const list = getLocal<WrittenQuestion>(STORAGE_KEYS.WRITTEN, INITIAL_WRITTEN_QUESTIONS);
-  if (isEdit) {
-    const idx = list.findIndex(w => w.id === savedRecord.id);
-    if (idx !== -1) list[idx] = savedRecord;
-    else list.unshift(savedRecord);
-  } else {
-    list.unshift(savedRecord);
-  }
-  setLocal(STORAGE_KEYS.WRITTEN, list);
-
-  return savedRecord;
+  setLocal(STORAGE_KEYS.WRITTEN, list.filter(w => w.id !== id));
+  return true;
 }
 
 // ==================== GLOSSARY & RESOURCES API ====================
@@ -676,52 +649,33 @@ export async function getGlossaryTerms(): Promise<GlossaryTerm[]> {
 }
 
 export async function saveGlossaryTerm(term: Omit<GlossaryTerm, 'id' | 'created_at'> & { id?: string }): Promise<GlossaryTerm> {
-  const isEdit = Boolean(term.id);
+  const originalId = term.id;
   const item: GlossaryTerm = {
     ...term,
-    id: term.id || generateUuid(),
+    id: (originalId && isValidUuid(originalId)) ? originalId : generateUuid(),
     created_at: new Date().toISOString()
   };
 
-  const client = getSupabase();
-  let savedRecord = item;
-
-  if (client) {
-    if (isEdit) {
-      const { data, error } = await client.from('glossary').update(item).eq('id', item.id).select();
-      if (error) {
-        console.error('[Supabase Error] Update glossary error:', error);
-        throw new Error(`Supabase-এ সেভ ব্যর্থ: ${error.message}`);
-      }
-      if (data && data.length > 0) savedRecord = data[0] as GlossaryTerm;
-    } else {
-      const { data, error } = await client.from('glossary').insert([item]).select();
-      if (error) {
-        console.error('[Supabase Error] Insert glossary error:', error);
-        throw new Error(`Supabase-এ ইনসার্ট ব্যর্থ: ${error.message}`);
-      }
-      if (data && data.length > 0) savedRecord = data[0] as GlossaryTerm;
-    }
-  }
+  const savedRecord = await safeSupabaseSave<GlossaryTerm>('glossary', item, originalId);
 
   const list = getLocal<GlossaryTerm>(STORAGE_KEYS.GLOSSARY, INITIAL_GLOSSARY);
-  if (isEdit) {
-    const idx = list.findIndex(g => g.id === savedRecord.id);
-    if (idx !== -1) list[idx] = savedRecord;
-    else list.unshift(savedRecord);
-  } else {
-    list.unshift(savedRecord);
+  let updatedList = list;
+  if (originalId && originalId !== savedRecord.id) {
+    updatedList = updatedList.filter(g => g.id !== originalId);
   }
-  setLocal(STORAGE_KEYS.GLOSSARY, list);
+  const idx = updatedList.findIndex(g => g.id === savedRecord.id);
+  if (idx !== -1) updatedList[idx] = savedRecord;
+  else updatedList.unshift(savedRecord);
 
+  setLocal(STORAGE_KEYS.GLOSSARY, updatedList);
   return savedRecord;
 }
 
 export async function deleteGlossaryTerm(id: string): Promise<boolean> {
   const client = getSupabase();
-  if (client) {
+  if (client && isValidUuid(id)) {
     const { error } = await client.from('glossary').delete().eq('id', id);
-    if (error) {
+    if (error && error.code !== '22P02') {
       console.error('[Supabase Error] Delete glossary error:', error);
       throw new Error(`Supabase-এ গ্লোসারি ডিলিট ব্যর্থ: ${error.message}`);
     }
@@ -753,52 +707,34 @@ export async function getLectureSheets(): Promise<LectureSheet[]> {
 }
 
 export async function saveLectureSheet(res: Omit<LectureSheet, 'id' | 'created_at'> & { id?: string }): Promise<LectureSheet> {
-  const isEdit = Boolean(res.id);
+  const originalId = res.id;
   const item: LectureSheet = {
     ...res,
-    id: res.id || generateUuid(),
+    id: (originalId && isValidUuid(originalId)) ? originalId : generateUuid(),
     download_count: res.download_count || 0,
     created_at: new Date().toISOString()
   };
 
-  const client = getSupabase();
-  let savedRecord = item;
-
-  if (client) {
-    if (isEdit) {
-      const { data, error } = await client.from('resources').update(item).eq('id', item.id).select();
-      if (error) {
-        console.error('[Supabase Error] Update resource error:', error);
-        throw new Error(`Supabase-এ রিসোর্স আপডেট ব্যর্থ: ${error.message}`);
-      }
-      if (data && data.length > 0) savedRecord = data[0] as LectureSheet;
-    } else {
-      const { data, error } = await client.from('resources').insert([item]).select();
-      if (error) {
-        console.error('[Supabase Error] Insert resource error:', error);
-        throw new Error(`Supabase-এ রিসোর্স ইনসার্ট ব্যর্থ: ${error.message}`);
-      }
-      if (data && data.length > 0) savedRecord = data[0] as LectureSheet;
-    }
-  }
+  const savedRecord = await safeSupabaseSave<LectureSheet>('resources', item, originalId);
 
   const list = getLocal<LectureSheet>(STORAGE_KEYS.RESOURCES, INITIAL_RESOURCES);
-  if (isEdit) {
-    const idx = list.findIndex(r => r.id === savedRecord.id);
-    if (idx !== -1) list[idx] = savedRecord;
-    else list.unshift(savedRecord);
-  } else {
-    list.unshift(savedRecord);
+  let updatedList = list;
+  if (originalId && originalId !== savedRecord.id) {
+    updatedList = updatedList.filter(r => r.id !== originalId);
   }
-  setLocal(STORAGE_KEYS.RESOURCES, list);
+  const idx = updatedList.findIndex(r => r.id === savedRecord.id);
+  if (idx !== -1) updatedList[idx] = savedRecord;
+  else updatedList.unshift(savedRecord);
+
+  setLocal(STORAGE_KEYS.RESOURCES, updatedList);
   return savedRecord;
 }
 
 export async function deleteLectureSheet(id: string): Promise<boolean> {
   const client = getSupabase();
-  if (client) {
+  if (client && isValidUuid(id)) {
     const { error } = await client.from('resources').delete().eq('id', id);
-    if (error) {
+    if (error && error.code !== '22P02') {
       console.error('[Supabase Error] Delete resource error:', error);
       throw new Error(`Supabase-এ রিসোর্স ডিলিট ব্যর্থ: ${error.message}`);
     }
