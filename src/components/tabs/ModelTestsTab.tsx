@@ -401,17 +401,8 @@ export const ModelTestsTab: React.FC<Props> = ({
               <div className="flex items-center justify-between pt-4 mt-4 border-t border-slate-800/80 gap-2">
                 <div className="flex items-center gap-2">
                   <button
-                    onClick={() => handleStartLiveExam(test)}
-                    className="text-xs px-2.5 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-semibold flex items-center gap-1 transition-all shadow-md active:scale-95"
-                    title="পরীক্ষার্থী মোডে সরাসরি পরীক্ষা দিন"
-                  >
-                    <Sparkles className="w-3.5 h-3.5" />
-                    <span>পরীক্ষা দিন</span>
-                  </button>
-
-                  <button
                     onClick={() => setPreviewTest(test)}
-                    className="text-xs text-slate-300 hover:text-emerald-400 flex items-center gap-1 font-medium transition-colors px-2 py-1 rounded-lg hover:bg-slate-800"
+                    className="text-xs text-slate-300 hover:text-emerald-400 flex items-center gap-1 font-medium transition-colors px-2.5 py-1 rounded-lg bg-slate-800/80 hover:bg-slate-800 border border-slate-700/60"
                   >
                     <Eye className="w-3.5 h-3.5" />
                     <span>পূর্বরূপ</span>
