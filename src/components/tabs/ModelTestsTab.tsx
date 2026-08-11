@@ -29,6 +29,7 @@ import {
 } from 'lucide-react';
 import { ModelTest, Question, Subject, CadreTier } from '../../types';
 import { useToast } from '../Toast';
+import { parseQuestionIds } from '../../lib/supabase';
 
 // Helper to convert numbers to Bengali digits
 export const toBengaliDigits = (num: number | string): string => {
@@ -304,7 +305,7 @@ export const ModelTestsTab: React.FC<Props> = ({
       is_published: true,
       scheduled_at: '',
       show_as_upcoming: true,
-      question_ids: questions.slice(0, 5).map((q) => q.id)
+      question_ids: questions.slice(0, 10).map((q) => String(q.id))
     });
     setIsScheduled(false);
     setEditingTest(null);
@@ -326,7 +327,7 @@ export const ModelTestsTab: React.FC<Props> = ({
       is_published: test.is_published,
       scheduled_at: test.scheduled_at || '',
       show_as_upcoming: test.show_as_upcoming !== undefined ? test.show_as_upcoming : true,
-      question_ids: test.question_ids || []
+      question_ids: parseQuestionIds(test.question_ids)
     });
     setIsScheduled(Boolean(test.scheduled_at));
     setEditingTest(test);
@@ -588,7 +589,7 @@ export const ModelTestsTab: React.FC<Props> = ({
           {/* Model Tests Grid */}
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
             {filteredAdminTests.map((test) => {
-              const qCount = test.question_ids?.length || 0;
+              const qCount = parseQuestionIds(test.question_ids).length;
               const schedState = getTestScheduleState(test);
 
               return (
@@ -827,7 +828,7 @@ export const ModelTestsTab: React.FC<Props> = ({
           {/* Student Visible Tests Cards Grid */}
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
             {studentAppVisibleTests.map((test) => {
-              const qCount = test.question_ids?.length || 0;
+              const qCount = parseQuestionIds(test.question_ids).length;
               const schedState = getTestScheduleState(test);
 
               return (
@@ -1284,7 +1285,7 @@ export const ModelTestsTab: React.FC<Props> = ({
                   {previewTest.subject}
                 </span>
                 <span className="text-xs px-2.5 py-0.5 rounded-full bg-slate-800 text-slate-300 font-mono">
-                  {toBengaliDigits(previewTest.question_ids?.length || 0)}টি প্রশ্ন &bull; {toBengaliDigits(previewTest.duration_minutes)} মিনিট
+                  {toBengaliDigits(parseQuestionIds(previewTest.question_ids).length)}টি প্রশ্ন &bull; {toBengaliDigits(previewTest.duration_minutes)} মিনিট
                 </span>
               </div>
               <h3 className="text-xl font-bold text-white font-serif mt-2">{previewTest.title}</h3>
@@ -1293,11 +1294,11 @@ export const ModelTestsTab: React.FC<Props> = ({
 
             <div className="space-y-4">
               <h4 className="font-semibold text-xs text-slate-300 uppercase tracking-wider">
-                পরীক্ষার অন্তর্ভুক্ত প্রশ্নসমূহ ({toBengaliDigits(previewTest.question_ids?.length || 0)}টি MCQ):
+                পরীক্ষার অন্তর্ভুক্ত প্রশ্নসমূহ ({toBengaliDigits(parseQuestionIds(previewTest.question_ids).length)}টি MCQ):
               </h4>
 
-              {previewTest.question_ids?.map((qId, idx) => {
-                const q = questions.find((item) => item.id === qId);
+              {parseQuestionIds(previewTest.question_ids).map((qId, idx) => {
+                const q = questions.find((item) => String(item.id).trim() === String(qId).trim());
                 if (!q) return null;
                 return (
                   <div key={qId} className="bg-slate-950 border border-slate-800 p-4 rounded-xl text-xs space-y-2">
@@ -1382,15 +1383,15 @@ export const ModelTestsTab: React.FC<Props> = ({
                   {/* Progress Tracker */}
                   <div className="bg-slate-950 p-3 rounded-xl border border-slate-800/80 flex items-center justify-between text-xs text-slate-300 font-mono">
                     <span>
-                      উত্তর প্রদান করেছেন: <strong className="text-emerald-400">{toBengaliDigits(Object.keys(userAnswers).length)}</strong> / {toBengaliDigits(activeExam.question_ids?.length || 0)}
+                      উত্তর প্রদান করেছেন: <strong className="text-emerald-400">{toBengaliDigits(Object.keys(userAnswers).length)}</strong> / {toBengaliDigits(parseQuestionIds(activeExam.question_ids).length)}
                     </span>
                     <span className="text-[11px] text-slate-400">
                       নেগেটিভ মার্কিং: {activeExam.negative_marking ? 'সক্রিয় (-0.25)' : 'নিষ্ক্রিয়'}
                     </span>
                   </div>
 
-                  {activeExam.question_ids?.map((qId, qIdx) => {
-                    const q = questions.find((item) => item.id === qId);
+                  {parseQuestionIds(activeExam.question_ids).map((qId, qIdx) => {
+                    const q = questions.find((item) => String(item.id).trim() === String(qId).trim());
                     if (!q) return null;
                     const selectedOpt = userAnswers[qId];
 
@@ -1442,12 +1443,13 @@ export const ModelTestsTab: React.FC<Props> = ({
                 /* EXAM RESULT SCOREBOARD */
                 <div className="space-y-6 animate-in fade-in">
                   {(() => {
-                    const totalQ = activeExam.question_ids?.length || 0;
+                    const testQIds = parseQuestionIds(activeExam.question_ids);
+                    const totalQ = testQIds.length;
                     let correctCount = 0;
                     let incorrectCount = 0;
 
-                    activeExam.question_ids?.forEach((qId) => {
-                      const q = questions.find((item) => item.id === qId);
+                    testQIds.forEach((qId) => {
+                      const q = questions.find((item) => String(item.id).trim() === String(qId).trim());
                       if (!q) return;
                       const ans = userAnswers[qId];
                       if (ans === undefined) return;

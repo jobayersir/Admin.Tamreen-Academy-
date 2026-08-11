@@ -399,9 +399,58 @@ export async function deleteQuestion(id: string): Promise<boolean> {
   return true;
 }
 
+// Helper to parse and normalize question_ids from JSON strings, arrays, or comma-delimited strings
+export function parseQuestionIds(raw: any): string[] {
+  if (!raw) return [];
+  if (Array.isArray(raw)) {
+    return raw
+      .map((item) => (typeof item === 'object' && item !== null ? String(item.id || item) : String(item)))
+      .filter((s) => s.trim().length > 0);
+  }
+  if (typeof raw === 'string') {
+    const trimmed = raw.trim();
+    if (!trimmed) return [];
+    if (trimmed.startsWith('[') && trimmed.endsWith(']')) {
+      try {
+        const parsed = JSON.parse(trimmed);
+        if (Array.isArray(parsed)) {
+          return parsed
+            .map((item) => (typeof item === 'object' && item !== null ? String(item.id || item) : String(item)))
+            .filter((s) => s.trim().length > 0);
+        }
+      } catch {
+        // fallback
+      }
+    }
+    return trimmed.split(',').map((s) => s.trim()).filter((s) => s.length > 0);
+  }
+  return [];
+}
+
+export function normalizeModelTest(test: any): ModelTest {
+  return {
+    ...test,
+    id: String(test.id),
+    title: test.title || '',
+    subtitle: test.subtitle || '',
+    subject: test.subject || '',
+    cadre_tier: test.cadre_tier || '',
+    duration_minutes: Number(test.duration_minutes) || 60,
+    total_marks: Number(test.total_marks) || 100,
+    pass_mark: Number(test.pass_mark) || 50,
+    negative_marking: test.negative_marking !== undefined ? Boolean(test.negative_marking) : true,
+    is_premium: Boolean(test.is_premium),
+    is_published: test.is_published !== undefined ? Boolean(test.is_published) : true,
+    scheduled_at: test.scheduled_at || undefined,
+    show_as_upcoming: test.show_as_upcoming !== undefined ? Boolean(test.show_as_upcoming) : true,
+    question_ids: parseQuestionIds(test.question_ids),
+    created_at: test.created_at || new Date().toISOString()
+  };
+}
+
 // ==================== MODEL TESTS API ====================
 export async function getModelTests(): Promise<ModelTest[]> {
-  const localList = getLocal<ModelTest>(STORAGE_KEYS.MODEL_TESTS, INITIAL_MODEL_TESTS);
+  const localList = getLocal<ModelTest>(STORAGE_KEYS.MODEL_TESTS, INITIAL_MODEL_TESTS).map(normalizeModelTest);
   const client = getSupabase();
   if (client) {
     try {
@@ -413,7 +462,10 @@ export async function getModelTests(): Promise<ModelTest[]> {
         // Set local cached items first
         localList.forEach(item => map.set(item.id, item));
         // Overwrite with live Supabase database records
-        (res.data as ModelTest[]).forEach(item => map.set(item.id, item));
+        (res.data as any[]).forEach(item => {
+          const normalized = normalizeModelTest(item);
+          map.set(normalized.id, normalized);
+        });
         return Array.from(map.values()).sort((a, b) => new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime());
       }
     } catch (err) {
@@ -427,39 +479,26 @@ export async function saveModelTest(test: Omit<ModelTest, 'id' | 'created_at'> &
   const originalId = test.id;
   const testId = (originalId && isValidUuid(originalId)) ? originalId : generateUuid();
 
-  const modelTest: ModelTest = {
+  const modelTest: ModelTest = normalizeModelTest({
     ...test,
-    id: testId,
-    title: test.title || '',
-    subtitle: test.subtitle || '',
-    subject: test.subject || '',
-    cadre_tier: test.cadre_tier || '',
-    duration_minutes: Number(test.duration_minutes) || 60,
-    total_marks: Number(test.total_marks) || 100,
-    pass_mark: Number(test.pass_mark) || 50,
-    negative_marking: Boolean(test.negative_marking),
-    is_premium: Boolean(test.is_premium),
-    is_published: Boolean(test.is_published),
-    scheduled_at: test.scheduled_at || undefined,
-    show_as_upcoming: test.show_as_upcoming !== undefined ? Boolean(test.show_as_upcoming) : false,
-    question_ids: Array.isArray(test.question_ids) ? test.question_ids : [],
-    created_at: new Date().toISOString()
-  } as ModelTest;
+    id: testId
+  });
 
   const savedRecord = await safeSupabaseSave<ModelTest>('model_tests', modelTest, originalId);
+  const finalRecord = normalizeModelTest(savedRecord);
 
   // Update local storage cache
-  const list = getLocal<ModelTest>(STORAGE_KEYS.MODEL_TESTS, INITIAL_MODEL_TESTS);
+  const list = getLocal<ModelTest>(STORAGE_KEYS.MODEL_TESTS, INITIAL_MODEL_TESTS).map(normalizeModelTest);
   let updatedList = list;
-  if (originalId && originalId !== savedRecord.id) {
+  if (originalId && originalId !== finalRecord.id) {
     updatedList = updatedList.filter(m => m.id !== originalId);
   }
-  const idx = updatedList.findIndex(m => m.id === savedRecord.id);
-  if (idx !== -1) updatedList[idx] = savedRecord;
-  else updatedList.unshift(savedRecord);
+  const idx = updatedList.findIndex(m => m.id === finalRecord.id);
+  if (idx !== -1) updatedList[idx] = finalRecord;
+  else updatedList.unshift(finalRecord);
 
   setLocal(STORAGE_KEYS.MODEL_TESTS, updatedList);
-  return savedRecord;
+  return finalRecord;
 }
 
 export async function deleteModelTest(id: string): Promise<boolean> {
