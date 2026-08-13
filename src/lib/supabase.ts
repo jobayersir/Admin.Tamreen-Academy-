@@ -462,6 +462,7 @@ export function normalizeModelTest(test: any): ModelTest {
     title: test.title || '',
     subtitle: test.subtitle || '',
     subject: test.subject || '',
+    topic: test.topic || undefined,
     cadre_tier: test.cadre_tier || '',
     duration_minutes: Number(test.duration_minutes) || 60,
     total_marks: Number(test.total_marks) || 100,

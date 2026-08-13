@@ -45,6 +45,7 @@ export interface ModelTest {
   title: string;
   subtitle: string;
   subject: Subject;
+  topic?: string;
   cadre_tier: CadreTier;
   duration_minutes: number;
   total_marks: number;

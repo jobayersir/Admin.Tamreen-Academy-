@@ -54,8 +54,16 @@ export const getQuestionsForTest = (test: ModelTest, allQuestions: Question[]): 
     }
   }
 
-  // Fallback 1: Filter questions by test.subject
+  // Fallback 1: Filter questions by test.subject & test.topic
   if (test.subject) {
+    if (test.topic) {
+      const topicMatched = allQuestions.filter(
+        (q) => q.subject === test.subject && q.topic === test.topic
+      );
+      if (topicMatched.length > 0) {
+        return topicMatched;
+      }
+    }
     const subjectMatched = allQuestions.filter((q) => q.subject === test.subject);
     if (subjectMatched.length > 0) {
       return subjectMatched;
@@ -202,6 +210,7 @@ export const ModelTestsTab: React.FC<Props> = ({
     title: '',
     subtitle: '',
     subject: 'বালাগাত ও মানতিক' as Subject,
+    topic: '',
     cadre_tier: 'প্রভাষক (আরবি)' as CadreTier,
     duration_minutes: 60,
     total_marks: 100,
@@ -227,6 +236,15 @@ export const ModelTestsTab: React.FC<Props> = ({
     new Set(
       questions
         .filter((q) => modalSubjectFilter === 'All' || q.subject === modalSubjectFilter)
+        .map((q) => q.topic)
+        .filter((t): t is string => Boolean(t && t.trim()))
+    )
+  );
+
+  const availableTopicsForCurrentSubject = Array.from(
+    new Set(
+      questions
+        .filter((q) => !formData.subject || q.subject === formData.subject)
         .map((q) => q.topic)
         .filter((t): t is string => Boolean(t && t.trim()))
     )
@@ -349,6 +367,7 @@ export const ModelTestsTab: React.FC<Props> = ({
       title: '',
       subtitle: '',
       subject: initialSubject,
+      topic: '',
       cadre_tier: 'প্রভাষক (আরবি)',
       duration_minutes: 60,
       total_marks: 100,
@@ -373,6 +392,7 @@ export const ModelTestsTab: React.FC<Props> = ({
       title: test.title,
       subtitle: test.subtitle,
       subject: test.subject,
+      topic: test.topic || '',
       cadre_tier: test.cadre_tier,
       duration_minutes: test.duration_minutes || 60,
       total_marks: test.total_marks || 100,
@@ -385,7 +405,7 @@ export const ModelTestsTab: React.FC<Props> = ({
       question_ids: parseQuestionIds(test.question_ids)
     });
     setModalSubjectFilter(test.subject || 'All');
-    setModalTopicFilter('All');
+    setModalTopicFilter(test.topic || 'All');
     setIsScheduled(Boolean(test.scheduled_at));
     setEditingTest(test);
     setIsModalOpen(true);
@@ -405,6 +425,7 @@ export const ModelTestsTab: React.FC<Props> = ({
         title: formData.title,
         subtitle: formData.subtitle,
         subject: formData.subject,
+        topic: formData.topic.trim() || undefined,
         cadre_tier: formData.cadre_tier,
         duration_minutes: Number(formData.duration_minutes),
         total_marks: Number(formData.total_marks),
@@ -658,9 +679,17 @@ export const ModelTestsTab: React.FC<Props> = ({
                   <div className="space-y-3">
                     {/* Status & Category Badges */}
                     <div className="flex items-center justify-between gap-2 flex-wrap">
-                      <span className="text-[10px] px-2.5 py-0.5 rounded-full bg-slate-800 text-emerald-400 border border-slate-700 font-medium">
-                        {test.subject}
-                      </span>
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        <span className="text-[10px] px-2.5 py-0.5 rounded-full bg-slate-800 text-emerald-400 border border-slate-700 font-medium">
+                          {test.subject}
+                        </span>
+                        {test.topic && (
+                          <span className="text-[10px] px-2.5 py-0.5 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/30 font-medium flex items-center gap-1">
+                            <Layers className="w-3 h-3 text-amber-400" />
+                            {test.topic}
+                          </span>
+                        )}
+                      </div>
 
                       <div className="flex items-center gap-1.5">
                         {test.is_premium ? (
@@ -901,10 +930,18 @@ export const ModelTestsTab: React.FC<Props> = ({
                 >
                   <div className="space-y-3">
                     {/* Top Badges */}
-                    <div className="flex items-center justify-between gap-2">
-                      <span className="text-[10px] px-2.5 py-0.5 rounded-full bg-slate-800 text-emerald-400 border border-slate-700 font-medium">
-                        {test.subject} &bull; {test.cadre_tier}
-                      </span>
+                    <div className="flex items-center justify-between gap-2 flex-wrap">
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        <span className="text-[10px] px-2.5 py-0.5 rounded-full bg-slate-800 text-emerald-400 border border-slate-700 font-medium">
+                          {test.subject} &bull; {test.cadre_tier}
+                        </span>
+                        {test.topic && (
+                          <span className="text-[10px] px-2.5 py-0.5 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/30 font-medium flex items-center gap-1">
+                            <Layers className="w-3 h-3 text-amber-400" />
+                            {test.topic}
+                          </span>
+                        )}
+                      </div>
 
                       {schedState.isUpcoming ? (
                         <span className="text-[10px] px-2.5 py-0.5 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/40 font-bold flex items-center gap-1">
@@ -1067,6 +1104,73 @@ export const ModelTestsTab: React.FC<Props> = ({
                     ))}
                   </select>
                 </div>
+              </div>
+
+              {/* Topic Selector & Manual Input Section */}
+              <div className="bg-slate-950 p-3.5 rounded-xl border border-slate-800 space-y-2.5">
+                <div className="flex items-center justify-between gap-2 flex-wrap">
+                  <label className="text-slate-200 text-xs font-semibold flex items-center gap-1.5">
+                    <Layers className="w-4 h-4 text-amber-400" />
+                    <span>পরীক্ষার টপিক / অধ্যায় (Topic) (ঐচ্ছিক):</span>
+                  </label>
+                  {formData.topic && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setFormData({ ...formData, topic: '' });
+                        setModalTopicFilter('All');
+                      }}
+                      className="text-[11px] text-rose-400 hover:text-rose-300 underline"
+                    >
+                      টপিক রিসেট
+                    </button>
+                  )}
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <input
+                    type="text"
+                    value={formData.topic || ''}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      setFormData({ ...formData, topic: val });
+                      setModalTopicFilter(val.trim() || 'All');
+                    }}
+                    placeholder="যেমন: ইলমুল বায়ান, অধ্যায় ১: কালাম ইত্যাদি (টাইপ করুন বা নিচের বাটন ক্লিক করুন)"
+                    className="flex-1 bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-xs text-slate-100 placeholder:text-slate-500 focus:border-amber-500 focus:outline-none"
+                  />
+                </div>
+
+                {/* Existing Topics for the selected subject as Quick Selection Buttons */}
+                {availableTopicsForCurrentSubject.length > 0 && (
+                  <div className="pt-1">
+                    <span className="text-[11px] text-slate-400 block mb-1.5 font-medium">
+                      {formData.subject ? `"${formData.subject}" বিষয়ের উপলব্ধ টপিক বাটনসমূহ (ক্লিক করে সিলেক্ট করুন):` : 'উপলব্ধ টপিক বাটনসমূহ:'}
+                    </span>
+                    <div className="flex items-center gap-1.5 flex-wrap max-h-24 overflow-y-auto pr-1">
+                      {availableTopicsForCurrentSubject.map((t) => {
+                        const isSelected = formData.topic === t;
+                        return (
+                          <button
+                            key={t}
+                            type="button"
+                            onClick={() => {
+                              setFormData({ ...formData, topic: t });
+                              setModalTopicFilter(t);
+                            }}
+                            className={`px-2.5 py-1 rounded-lg text-xs font-medium transition-all ${
+                              isSelected
+                                ? 'bg-amber-500 text-slate-950 font-bold shadow-md ring-1 ring-amber-400'
+                                : 'bg-slate-900 text-slate-300 hover:bg-slate-800 border border-slate-800'
+                            }`}
+                          >
+                            {t}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
               </div>
 
               <div className="grid grid-cols-3 gap-3">
@@ -1507,10 +1611,16 @@ export const ModelTestsTab: React.FC<Props> = ({
               return (
                 <>
                   <div className="border-b border-slate-800 pb-3">
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-2 flex-wrap">
                       <span className="text-xs px-2.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 font-medium">
                         {previewTest.subject}
                       </span>
+                      {previewTest.topic && (
+                        <span className="text-xs px-2.5 py-0.5 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/30 font-medium flex items-center gap-1">
+                          <Layers className="w-3.5 h-3.5 text-amber-400" />
+                          {previewTest.topic}
+                        </span>
+                      )}
                       <span className="text-xs px-2.5 py-0.5 rounded-full bg-slate-800 text-slate-300 font-mono">
                         {toBengaliDigits(testQuestions.length)}টি প্রশ্ন &bull; {toBengaliDigits(previewTest.duration_minutes)} মিনিট &bull; {toBengaliDigits(previewTest.total_marks)} মার্কস
                       </span>
@@ -1577,9 +1687,17 @@ export const ModelTestsTab: React.FC<Props> = ({
             {/* Top Bar / Header */}
             <div className="flex items-center justify-between border-b border-slate-800 pb-4 mb-4 shrink-0">
               <div>
-                <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-emerald-950 text-emerald-300 border border-emerald-800">
-                  {activeExam.subject} &bull; {activeExam.cadre_tier}
-                </span>
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-emerald-950 text-emerald-300 border border-emerald-800">
+                    {activeExam.subject} &bull; {activeExam.cadre_tier}
+                  </span>
+                  {activeExam.topic && (
+                    <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-amber-950 text-amber-300 border border-amber-800 flex items-center gap-1">
+                      <Layers className="w-3 h-3 text-amber-400" />
+                      {activeExam.topic}
+                    </span>
+                  )}
+                </div>
                 <h3 className="text-base sm:text-lg font-bold text-white font-serif mt-1">{activeExam.title}</h3>
               </div>
 
