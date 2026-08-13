@@ -37,6 +37,32 @@ export const toBengaliDigits = (num: number | string): string => {
   return String(num).replace(/\d/g, (digit) => bnDigits[parseInt(digit, 10)] || digit);
 };
 
+// Helper to resolve actual questions for a Model Test from Question Bank
+export const getQuestionsForTest = (test: ModelTest, allQuestions: Question[]): Question[] => {
+  const qIds = parseQuestionIds(test.question_ids);
+
+  if (qIds.length > 0) {
+    const matched = qIds
+      .map((qId) => allQuestions.find((q) => String(q.id).trim() === String(qId).trim()))
+      .filter((q): q is Question => q !== undefined);
+
+    if (matched.length > 0) {
+      return matched;
+    }
+  }
+
+  // Fallback 1: Filter questions by test.subject
+  if (test.subject) {
+    const subjectMatched = allQuestions.filter((q) => q.subject === test.subject);
+    if (subjectMatched.length > 0) {
+      return subjectMatched;
+    }
+  }
+
+  // Fallback 2: Return all available questions
+  return allQuestions;
+};
+
 // Helper to format ISO date string to Bengali date and time
 export const formatBengaliDateTime = (dateStr?: string): string => {
   if (!dateStr) return '';
@@ -162,6 +188,7 @@ export const ModelTestsTab: React.FC<Props> = ({
   const [isScheduled, setIsScheduled] = useState(false);
 
   // Form State
+  const [modalSubjectFilter, setModalSubjectFilter] = useState<string>('All');
   const [formData, setFormData] = useState({
     id: '',
     title: '',
@@ -291,11 +318,15 @@ export const ModelTestsTab: React.FC<Props> = ({
   });
 
   const handleOpenCreate = () => {
+    const initialSubject = 'বালাগাত ও মানতিক' as Subject;
+    const matchingQs = questions.filter((q) => q.subject === initialSubject);
+    const pool = matchingQs.length > 0 ? matchingQs : questions;
+
     setFormData({
       id: '',
       title: '',
       subtitle: '',
-      subject: 'বালাগাত ও মানতিক',
+      subject: initialSubject,
       cadre_tier: 'প্রভাষক (আরবি)',
       duration_minutes: 60,
       total_marks: 100,
@@ -305,8 +336,9 @@ export const ModelTestsTab: React.FC<Props> = ({
       is_published: true,
       scheduled_at: '',
       show_as_upcoming: true,
-      question_ids: questions.slice(0, 10).map((q) => String(q.id))
+      question_ids: pool.map((q) => String(q.id))
     });
+    setModalSubjectFilter(initialSubject);
     setIsScheduled(false);
     setEditingTest(null);
     setIsModalOpen(true);
@@ -319,16 +351,17 @@ export const ModelTestsTab: React.FC<Props> = ({
       subtitle: test.subtitle,
       subject: test.subject,
       cadre_tier: test.cadre_tier,
-      duration_minutes: test.duration_minutes,
-      total_marks: test.total_marks,
-      pass_mark: test.pass_mark,
-      negative_marking: test.negative_marking,
-      is_premium: test.is_premium,
-      is_published: test.is_published,
+      duration_minutes: test.duration_minutes || 60,
+      total_marks: test.total_marks || 100,
+      pass_mark: test.pass_mark || 50,
+      negative_marking: test.negative_marking !== undefined ? test.negative_marking : true,
+      is_premium: test.is_premium || false,
+      is_published: test.is_published !== undefined ? test.is_published : true,
       scheduled_at: test.scheduled_at || '',
       show_as_upcoming: test.show_as_upcoming !== undefined ? test.show_as_upcoming : true,
       question_ids: parseQuestionIds(test.question_ids)
     });
+    setModalSubjectFilter(test.subject || 'All');
     setIsScheduled(Boolean(test.scheduled_at));
     setEditingTest(test);
     setIsModalOpen(true);
@@ -589,7 +622,8 @@ export const ModelTestsTab: React.FC<Props> = ({
           {/* Model Tests Grid */}
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
             {filteredAdminTests.map((test) => {
-              const qCount = parseQuestionIds(test.question_ids).length;
+              const testQuestions = getQuestionsForTest(test, questions);
+              const qCount = testQuestions.length;
               const schedState = getTestScheduleState(test);
 
               return (
@@ -828,7 +862,8 @@ export const ModelTestsTab: React.FC<Props> = ({
           {/* Student Visible Tests Cards Grid */}
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
             {studentAppVisibleTests.map((test) => {
-              const qCount = parseQuestionIds(test.question_ids).length;
+              const testQuestions = getQuestionsForTest(test, questions);
+              const qCount = testQuestions.length;
               const schedState = getTestScheduleState(test);
 
               return (
@@ -1163,73 +1198,140 @@ export const ModelTestsTab: React.FC<Props> = ({
               </div>
 
               {/* QUESTION SELECTION MANAGER */}
-              <div className="space-y-2 pt-2 border-t border-slate-800">
-                <div className="flex items-center justify-between">
-                  <label className="font-semibold text-white">
+              <div className="space-y-3 pt-3 border-t border-slate-800">
+                <div className="flex items-center justify-between flex-wrap gap-2">
+                  <label className="font-semibold text-white text-xs sm:text-sm">
                     মডেল টেস্টের অন্তর্ভুক্ত প্রশ্নসমূহ ({formData.question_ids.length}টি প্রশ্ন সিলেক্টেড)
                   </label>
-                  <span className="text-[11px] text-slate-400">মাস্টার প্রশ্ন ব্যাংক থেকে নির্বাচন করুন</span>
+                  <span className="text-[11px] text-emerald-400 font-mono font-medium">
+                    {questions.length}টির মধ্যে {formData.question_ids.length}টি নির্দিষ্ট
+                  </span>
+                </div>
+
+                {/* Filter & Quick Actions toolbar */}
+                <div className="flex items-center justify-between gap-2 flex-wrap bg-slate-950 p-2.5 rounded-xl border border-slate-800 text-xs">
+                  <div className="flex items-center gap-2">
+                    <span className="text-slate-400 text-[11px]">ফিল্টার:</span>
+                    <select
+                      value={modalSubjectFilter}
+                      onChange={(e) => setModalSubjectFilter(e.target.value)}
+                      className="bg-slate-900 text-slate-200 text-xs rounded-lg px-2.5 py-1 border border-slate-700 focus:border-emerald-500 focus:outline-none"
+                    >
+                      <option value="All">সব বিষয় ({questions.length}টি প্রশ্ন)</option>
+                      {subjectsList.map((s) => {
+                        const count = questions.filter((q) => q.subject === s).length;
+                        return (
+                          <option key={s} value={s}>
+                            {s} ({count}টি)
+                          </option>
+                        );
+                      })}
+                    </select>
+                  </div>
+
+                  <div className="flex items-center gap-1.5 flex-wrap">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const targetQs = questions.filter(
+                          (q) => modalSubjectFilter === 'All' || q.subject === modalSubjectFilter
+                        );
+                        const targetIds = targetQs.map((q) => String(q.id));
+                        const combined = Array.from(new Set([...formData.question_ids, ...targetIds]));
+                        setFormData({ ...formData, question_ids: combined });
+                      }}
+                      className="px-2.5 py-1 rounded-lg bg-emerald-950/80 hover:bg-emerald-900 text-emerald-300 border border-emerald-700/60 font-medium text-[11px] transition-colors"
+                    >
+                      এই বিষয়ের সব প্রশ্ন সেলেক্ট
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const targetQs = questions.filter(
+                          (q) => modalSubjectFilter === 'All' || q.subject === modalSubjectFilter
+                        );
+                        const ten = targetQs.slice(0, 10).map((q) => String(q.id));
+                        setFormData({ ...formData, question_ids: ten });
+                      }}
+                      className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 font-medium text-[11px] transition-colors"
+                    >
+                      ১০টি অটো-সেলেক্ট
+                    </button>
+
+                    {formData.question_ids.length > 0 && (
+                      <button
+                        type="button"
+                        onClick={() => setFormData({ ...formData, question_ids: [] })}
+                        className="px-2.5 py-1 rounded-lg bg-rose-950/60 hover:bg-rose-900 text-rose-300 border border-rose-800/60 font-medium text-[11px] transition-colors"
+                      >
+                        ক্লিয়ার (0)
+                      </button>
+                    )}
+                  </div>
                 </div>
 
                 <div className="max-h-60 overflow-y-auto space-y-2 pr-1 scrollbar-thin scrollbar-thumb-slate-800">
-                  {questions.map((q) => {
-                    const isSelected = formData.question_ids.includes(q.id);
-                    const selectedIdx = formData.question_ids.indexOf(q.id);
+                  {questions
+                    .filter((q) => modalSubjectFilter === 'All' || q.subject === modalSubjectFilter)
+                    .map((q) => {
+                      const isSelected = formData.question_ids.includes(q.id);
+                      const selectedIdx = formData.question_ids.indexOf(q.id);
 
-                    return (
-                      <div
-                        key={q.id}
-                        className={`p-3 rounded-xl border flex items-start gap-3 transition-all ${
-                          isSelected
-                            ? 'bg-emerald-950/40 border-emerald-700 text-emerald-100'
-                            : 'bg-slate-950/60 border-slate-800 text-slate-300'
-                        }`}
-                      >
-                        <input
-                          type="checkbox"
-                          checked={isSelected}
-                          onChange={() => handleToggleQuestionInTest(q.id)}
-                          className="mt-1 rounded border-slate-700 bg-slate-900 text-emerald-500 focus:ring-emerald-500"
-                        />
+                      return (
+                        <div
+                          key={q.id}
+                          className={`p-3 rounded-xl border flex items-start gap-3 transition-all ${
+                            isSelected
+                              ? 'bg-emerald-950/40 border-emerald-700 text-emerald-100'
+                              : 'bg-slate-950/60 border-slate-800 text-slate-300'
+                          }`}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={isSelected}
+                            onChange={() => handleToggleQuestionInTest(q.id)}
+                            className="mt-1 rounded border-slate-700 bg-slate-900 text-emerald-500 focus:ring-emerald-500"
+                          />
 
-                        <div className="flex-1 text-xs">
-                          <p className="font-medium">{q.question_bn}</p>
-                          {q.question_ar && (
-                            <p className="font-serif text-amber-300 mt-0.5 text-right font-semibold" dir="rtl">
-                              {q.question_ar}
-                            </p>
+                          <div className="flex-1 text-xs">
+                            <p className="font-medium">{q.question_bn}</p>
+                            {q.question_ar && (
+                              <p className="font-serif text-amber-300 mt-0.5 text-right font-semibold" dir="rtl">
+                                {q.question_ar}
+                              </p>
+                            )}
+                            <div className="flex items-center gap-2 mt-1 text-[10px] text-slate-400">
+                              <span>{q.subject}</span> &bull; <span>{q.difficulty}</span>
+                            </div>
+                          </div>
+
+                          {isSelected && (
+                            <div className="flex items-center gap-1 shrink-0">
+                              <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-emerald-900 text-emerald-300 font-bold">
+                                #{selectedIdx + 1}
+                              </span>
+                              <button
+                                type="button"
+                                onClick={() => handleMoveQuestion(selectedIdx, 'up')}
+                                disabled={selectedIdx === 0}
+                                className="p-1 rounded text-slate-400 hover:text-white disabled:opacity-30"
+                              >
+                                <MoveUp className="w-3.5 h-3.5" />
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => handleMoveQuestion(selectedIdx, 'down')}
+                                disabled={selectedIdx === formData.question_ids.length - 1}
+                                className="p-1 rounded text-slate-400 hover:text-white disabled:opacity-30"
+                              >
+                                <MoveDown className="w-3.5 h-3.5" />
+                              </button>
+                            </div>
                           )}
-                          <div className="flex items-center gap-2 mt-1 text-[10px] text-slate-400">
-                            <span>{q.subject}</span> &bull; <span>{q.difficulty}</span>
-                          </div>
                         </div>
-
-                        {isSelected && (
-                          <div className="flex items-center gap-1 shrink-0">
-                            <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-emerald-900 text-emerald-300 font-bold">
-                              #{selectedIdx + 1}
-                            </span>
-                            <button
-                              type="button"
-                              onClick={() => handleMoveQuestion(selectedIdx, 'up')}
-                              disabled={selectedIdx === 0}
-                              className="p-1 rounded text-slate-400 hover:text-white disabled:opacity-30"
-                            >
-                              <MoveUp className="w-3.5 h-3.5" />
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => handleMoveQuestion(selectedIdx, 'down')}
-                              disabled={selectedIdx === formData.question_ids.length - 1}
-                              className="p-1 rounded text-slate-400 hover:text-white disabled:opacity-30"
-                            >
-                              <MoveDown className="w-3.5 h-3.5" />
-                            </button>
-                          </div>
-                        )}
-                      </div>
-                    );
-                  })}
+                      );
+                    })}
                 </div>
               </div>
 
@@ -1279,67 +1381,70 @@ export const ModelTestsTab: React.FC<Props> = ({
               <X className="w-5 h-5" />
             </button>
 
-            <div className="border-b border-slate-800 pb-3">
-              <div className="flex items-center gap-2">
-                <span className="text-xs px-2.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 font-medium">
-                  {previewTest.subject}
-                </span>
-                <span className="text-xs px-2.5 py-0.5 rounded-full bg-slate-800 text-slate-300 font-mono">
-                  {toBengaliDigits(parseQuestionIds(previewTest.question_ids).length)}টি প্রশ্ন &bull; {toBengaliDigits(previewTest.duration_minutes)} মিনিট
-                </span>
-              </div>
-              <h3 className="text-xl font-bold text-white font-serif mt-2">{previewTest.title}</h3>
-              {previewTest.subtitle && <p className="text-xs text-slate-400 mt-0.5">{previewTest.subtitle}</p>}
-            </div>
-
-            <div className="space-y-4">
-              <h4 className="font-semibold text-xs text-slate-300 uppercase tracking-wider">
-                পরীক্ষার অন্তর্ভুক্ত প্রশ্নসমূহ ({toBengaliDigits(parseQuestionIds(previewTest.question_ids).length)}টি MCQ):
-              </h4>
-
-              {parseQuestionIds(previewTest.question_ids).map((qId, idx) => {
-                const q = questions.find((item) => String(item.id).trim() === String(qId).trim());
-                if (!q) return null;
-                return (
-                  <div key={qId} className="bg-slate-950 border border-slate-800 p-4 rounded-xl text-xs space-y-2">
-                    <div className="flex items-start justify-between gap-2">
-                      <span className="font-bold text-emerald-400">প্রশ্ন {toBengaliDigits(idx + 1)}.</span>
-                      <span className="text-[10px] text-slate-500 font-mono">{q.difficulty}</span>
+            {(() => {
+              const testQuestions = getQuestionsForTest(previewTest, questions);
+              return (
+                <>
+                  <div className="border-b border-slate-800 pb-3">
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs px-2.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 font-medium">
+                        {previewTest.subject}
+                      </span>
+                      <span className="text-xs px-2.5 py-0.5 rounded-full bg-slate-800 text-slate-300 font-mono">
+                        {toBengaliDigits(testQuestions.length)}টি প্রশ্ন &bull; {toBengaliDigits(previewTest.duration_minutes)} মিনিট &bull; {toBengaliDigits(previewTest.total_marks)} মার্কস
+                      </span>
                     </div>
-
-                    <p className="font-medium text-slate-100">{q.question_bn}</p>
-                    {q.question_ar && (
-                      <p className="font-serif text-amber-300 text-right text-sm leading-relaxed" dir="rtl">
-                        {q.question_ar}
-                      </p>
-                    )}
-
-                    <div className="grid grid-cols-2 gap-2 pt-2">
-                      {q.options.map((opt, oIdx) => (
-                        <div
-                          key={oIdx}
-                          className={`p-2 rounded-lg border text-xs ${
-                            oIdx === q.correct_option
-                              ? 'bg-emerald-950/60 border-emerald-600 text-emerald-200 font-semibold'
-                              : 'bg-slate-900 border-slate-800 text-slate-400'
-                          }`}
-                        >
-                          <span className="font-bold mr-1">{['ক', 'খ', 'গ', 'ঘ'][oIdx]}.</span>
-                          {opt}
-                        </div>
-                      ))}
-                    </div>
-
-                    {q.explanation && (
-                      <div className="mt-2 p-2.5 bg-slate-900 rounded-lg text-[11px] text-slate-300 border border-slate-800/80">
-                        <span className="font-semibold text-emerald-400">ব্যাখ্যা: </span>
-                        {q.explanation}
-                      </div>
-                    )}
+                    <h3 className="text-xl font-bold text-white font-serif mt-2">{previewTest.title}</h3>
+                    {previewTest.subtitle && <p className="text-xs text-slate-400 mt-0.5">{previewTest.subtitle}</p>}
                   </div>
-                );
-              })}
-            </div>
+
+                  <div className="space-y-4">
+                    <h4 className="font-semibold text-xs text-slate-300 uppercase tracking-wider">
+                      পরীক্ষার অন্তর্ভুক্ত প্রশ্নসমূহ ({toBengaliDigits(testQuestions.length)}টি MCQ):
+                    </h4>
+
+                    {testQuestions.map((q, idx) => (
+                      <div key={q.id} className="bg-slate-950 border border-slate-800 p-4 rounded-xl text-xs space-y-2">
+                        <div className="flex items-start justify-between gap-2">
+                          <span className="font-bold text-emerald-400">প্রশ্ন {toBengaliDigits(idx + 1)}.</span>
+                          <span className="text-[10px] text-slate-500 font-mono">{q.difficulty}</span>
+                        </div>
+
+                        <p className="font-medium text-slate-100">{q.question_bn}</p>
+                        {q.question_ar && (
+                          <p className="font-serif text-amber-300 text-right text-sm leading-relaxed" dir="rtl">
+                            {q.question_ar}
+                          </p>
+                        )}
+
+                        <div className="grid grid-cols-2 gap-2 pt-2">
+                          {q.options.map((opt, oIdx) => (
+                            <div
+                              key={oIdx}
+                              className={`p-2 rounded-lg border text-xs ${
+                                oIdx === q.correct_option
+                                  ? 'bg-emerald-950/60 border-emerald-600 text-emerald-200 font-semibold'
+                                  : 'bg-slate-900 border-slate-800 text-slate-400'
+                              }`}
+                            >
+                              <span className="font-bold mr-1">{['ক', 'খ', 'গ', 'ঘ'][oIdx]}.</span>
+                              {opt}
+                            </div>
+                          ))}
+                        </div>
+
+                        {q.explanation && (
+                          <div className="mt-2 p-2.5 bg-slate-900 rounded-lg text-[11px] text-slate-300 border border-slate-800/80">
+                            <span className="font-semibold text-emerald-400">ব্যাখ্যা: </span>
+                            {q.explanation}
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </>
+              );
+            })()}
           </div>
         </div>
       )}
@@ -1380,78 +1485,81 @@ export const ModelTestsTab: React.FC<Props> = ({
             <div className="flex-1 overflow-y-auto space-y-4 pr-1 scrollbar-thin scrollbar-thumb-slate-800">
               {!examSubmitted ? (
                 <div className="space-y-4">
-                  {/* Progress Tracker */}
-                  <div className="bg-slate-950 p-3 rounded-xl border border-slate-800/80 flex items-center justify-between text-xs text-slate-300 font-mono">
-                    <span>
-                      উত্তর প্রদান করেছেন: <strong className="text-emerald-400">{toBengaliDigits(Object.keys(userAnswers).length)}</strong> / {toBengaliDigits(parseQuestionIds(activeExam.question_ids).length)}
-                    </span>
-                    <span className="text-[11px] text-slate-400">
-                      নেগেটিভ মার্কিং: {activeExam.negative_marking ? 'সক্রিয় (-0.25)' : 'নিষ্ক্রিয়'}
-                    </span>
-                  </div>
-
-                  {parseQuestionIds(activeExam.question_ids).map((qId, qIdx) => {
-                    const q = questions.find((item) => String(item.id).trim() === String(qId).trim());
-                    if (!q) return null;
-                    const selectedOpt = userAnswers[qId];
-
+                  {(() => {
+                    const testQuestions = getQuestionsForTest(activeExam, questions);
                     return (
-                      <div key={qId} className="bg-slate-950 border border-slate-800/80 p-4 rounded-xl text-xs space-y-3">
-                        <div className="flex items-start justify-between gap-2">
-                          <span className="font-bold text-emerald-400 text-sm">
-                            প্রশ্ন {toBengaliDigits(qIdx + 1)}.
+                      <>
+                        {/* Progress Tracker */}
+                        <div className="bg-slate-950 p-3 rounded-xl border border-slate-800/80 flex items-center justify-between text-xs text-slate-300 font-mono">
+                          <span>
+                            উত্তর প্রদান করেছেন: <strong className="text-emerald-400">{toBengaliDigits(Object.keys(userAnswers).length)}</strong> / {toBengaliDigits(testQuestions.length)}
                           </span>
-                          <span className="text-[10px] text-slate-400 font-mono">১ মার্ক</span>
+                          <span className="text-[11px] text-slate-400">
+                            নেগেটিভ মার্কিং: {activeExam.negative_marking ? 'সক্রিয় (-0.25)' : 'নিষ্ক্রিয়'}
+                          </span>
                         </div>
 
-                        <p className="font-medium text-slate-100 text-sm leading-relaxed">{q.question_bn}</p>
-                        {q.question_ar && (
-                          <p className="font-serif text-amber-300 text-right text-base leading-relaxed" dir="rtl">
-                            {q.question_ar}
-                          </p>
-                        )}
+                        {testQuestions.map((q, qIdx) => {
+                          const selectedOpt = userAnswers[q.id];
 
-                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1">
-                          {q.options.map((opt, oIdx) => {
-                            const isChosen = selectedOpt === oIdx;
-                            return (
-                              <button
-                                key={oIdx}
-                                type="button"
-                                onClick={() => setUserAnswers((prev) => ({ ...prev, [qId]: oIdx }))}
-                                className={`p-3 rounded-xl border text-left text-xs transition-all flex items-center gap-2 ${
-                                  isChosen
-                                    ? 'bg-emerald-950/80 border-emerald-500 text-emerald-200 font-semibold shadow-md ring-1 ring-emerald-500/50'
-                                    : 'bg-slate-900 border-slate-800 text-slate-300 hover:bg-slate-800/80'
-                                }`}
-                              >
-                                <span className={`w-5 h-5 rounded-full border flex items-center justify-center text-[10px] font-bold shrink-0 ${
-                                  isChosen ? 'bg-emerald-500 text-slate-950 border-emerald-400' : 'border-slate-700 text-slate-400'
-                                }`}>
-                                  {['ক', 'খ', 'গ', 'ঘ'][oIdx]}
+                          return (
+                            <div key={q.id} className="bg-slate-950 border border-slate-800/80 p-4 rounded-xl text-xs space-y-3">
+                              <div className="flex items-start justify-between gap-2">
+                                <span className="font-bold text-emerald-400 text-sm">
+                                  প্রশ্ন {toBengaliDigits(qIdx + 1)}.
                                 </span>
-                                <span>{opt}</span>
-                              </button>
-                            );
-                          })}
-                        </div>
-                      </div>
+                                <span className="text-[10px] text-slate-400 font-mono">১ মার্ক</span>
+                              </div>
+
+                              <p className="font-medium text-slate-100 text-sm leading-relaxed">{q.question_bn}</p>
+                              {q.question_ar && (
+                                <p className="font-serif text-amber-300 text-right text-base leading-relaxed" dir="rtl">
+                                  {q.question_ar}
+                                </p>
+                              )}
+
+                              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1">
+                                {q.options.map((opt, oIdx) => {
+                                  const isChosen = selectedOpt === oIdx;
+                                  return (
+                                    <button
+                                      key={oIdx}
+                                      type="button"
+                                      onClick={() => setUserAnswers((prev) => ({ ...prev, [q.id]: oIdx }))}
+                                      className={`p-3 rounded-xl border text-left text-xs transition-all flex items-center gap-2 ${
+                                        isChosen
+                                          ? 'bg-emerald-950/80 border-emerald-500 text-emerald-200 font-semibold shadow-md ring-1 ring-emerald-500/50'
+                                          : 'bg-slate-900 border-slate-800 text-slate-300 hover:bg-slate-800/80'
+                                      }`}
+                                    >
+                                      <span className={`w-5 h-5 rounded-full border flex items-center justify-center text-[10px] font-bold shrink-0 ${
+                                        isChosen ? 'bg-emerald-500 text-slate-950 border-emerald-400' : 'border-slate-700 text-slate-400'
+                                      }`}>
+                                        {['ক', 'খ', 'গ', 'ঘ'][oIdx]}
+                                      </span>
+                                      <span>{opt}</span>
+                                    </button>
+                                  );
+                                })}
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </>
                     );
-                  })}
+                  })()}
                 </div>
               ) : (
                 /* EXAM RESULT SCOREBOARD */
                 <div className="space-y-6 animate-in fade-in">
                   {(() => {
-                    const testQIds = parseQuestionIds(activeExam.question_ids);
-                    const totalQ = testQIds.length;
+                    const testQuestions = getQuestionsForTest(activeExam, questions);
+                    const totalQ = testQuestions.length;
                     let correctCount = 0;
                     let incorrectCount = 0;
 
-                    testQIds.forEach((qId) => {
-                      const q = questions.find((item) => String(item.id).trim() === String(qId).trim());
-                      if (!q) return;
-                      const ans = userAnswers[qId];
+                    testQuestions.forEach((q) => {
+                      const ans = userAnswers[q.id];
                       if (ans === undefined) return;
                       if (ans === q.correct_option) correctCount++;
                       else incorrectCount++;
