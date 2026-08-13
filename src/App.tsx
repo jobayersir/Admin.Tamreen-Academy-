@@ -372,6 +372,8 @@ const AdminAppContent: React.FC = () => {
                 <ModelTestsTab
                   modelTests={modelTests}
                   questions={questions}
+                  customSubjects={customSubjects}
+                  onAddCustomSubject={handleAddCustomSubject}
                   onSaveModelTest={handleSaveModelTest}
                   onDeleteModelTest={handleDeleteModelTest}
                 />

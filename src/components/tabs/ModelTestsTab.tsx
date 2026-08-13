@@ -25,11 +25,14 @@ import {
   Shield,
   Play,
   Zap,
-  AlertCircle
+  AlertCircle,
+  BookOpen,
+  Layers
 } from 'lucide-react';
-import { ModelTest, Question, Subject, CadreTier } from '../../types';
+import { ModelTest, Question, Subject, CadreTier, DEFAULT_SUBJECTS } from '../../types';
 import { useToast } from '../Toast';
 import { parseQuestionIds } from '../../lib/supabase';
+import { SubjectSelector } from '../SubjectSelector';
 
 // Helper to convert numbers to Bengali digits
 export const toBengaliDigits = (num: number | string): string => {
@@ -150,6 +153,8 @@ const CountdownTimer: React.FC<{ targetDate: string; onExpire?: () => void }> = 
 interface Props {
   modelTests: ModelTest[];
   questions: Question[];
+  customSubjects?: string[];
+  onAddCustomSubject?: (subject: string) => void;
   onSaveModelTest: (test: Omit<ModelTest, 'id' | 'created_at'> & { id?: string }) => Promise<void>;
   onDeleteModelTest: (id: string) => Promise<void>;
 }
@@ -157,6 +162,8 @@ interface Props {
 export const ModelTestsTab: React.FC<Props> = ({
   modelTests,
   questions,
+  customSubjects = [],
+  onAddCustomSubject,
   onSaveModelTest,
   onDeleteModelTest
 }) => {
@@ -187,8 +194,9 @@ export const ModelTestsTab: React.FC<Props> = ({
   // Scheduled Launch Form State
   const [isScheduled, setIsScheduled] = useState(false);
 
-  // Form State
+  // Form State & Filters
   const [modalSubjectFilter, setModalSubjectFilter] = useState<string>('All');
+  const [modalTopicFilter, setModalTopicFilter] = useState<string>('All');
   const [formData, setFormData] = useState({
     id: '',
     title: '',
@@ -206,15 +214,29 @@ export const ModelTestsTab: React.FC<Props> = ({
     question_ids: [] as string[]
   });
 
-  const subjectsList: Subject[] = [
-    'বালাগাত ও মানতিক',
-    'আল-কুরআন',
-    'হাদিস',
-    'ফিকহ্ ও উসুল',
-    'বাংলা',
-    'ইংরেজি',
-    'আইসিটি ও সাধারণ জ্ঞান'
-  ];
+  const subjectsList: Subject[] = Array.from(
+    new Set([
+      ...DEFAULT_SUBJECTS,
+      ...(customSubjects || []),
+      ...questions.map((q) => q.subject).filter(Boolean),
+      ...modelTests.map((mt) => mt.subject).filter(Boolean)
+    ])
+  );
+
+  const availableTopics = Array.from(
+    new Set(
+      questions
+        .filter((q) => modalSubjectFilter === 'All' || q.subject === modalSubjectFilter)
+        .map((q) => q.topic)
+        .filter((t): t is string => Boolean(t && t.trim()))
+    )
+  );
+
+  const displayedQuestions = questions.filter((q) => {
+    const matchSub = modalSubjectFilter === 'All' || q.subject === modalSubjectFilter;
+    const matchTopic = modalTopicFilter === 'All' || q.topic === modalTopicFilter;
+    return matchSub && matchTopic;
+  });
 
   const cadreTiersList: CadreTier[] = [
     'প্রভাষক (আরবি)',
@@ -339,6 +361,7 @@ export const ModelTestsTab: React.FC<Props> = ({
       question_ids: pool.map((q) => String(q.id))
     });
     setModalSubjectFilter(initialSubject);
+    setModalTopicFilter('All');
     setIsScheduled(false);
     setEditingTest(null);
     setIsModalOpen(true);
@@ -362,6 +385,7 @@ export const ModelTestsTab: React.FC<Props> = ({
       question_ids: parseQuestionIds(test.question_ids)
     });
     setModalSubjectFilter(test.subject || 'All');
+    setModalTopicFilter('All');
     setIsScheduled(Boolean(test.scheduled_at));
     setEditingTest(test);
     setIsModalOpen(true);
@@ -1019,18 +1043,17 @@ export const ModelTestsTab: React.FC<Props> = ({
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-slate-300 font-medium mb-1">বিষয় (Subject)</label>
-                  <select
-                    value={formData.subject}
-                    onChange={(e) => setFormData({ ...formData, subject: e.target.value as Subject })}
-                    className="w-full bg-slate-950 border border-slate-800 rounded-xl p-2.5 text-slate-100 focus:border-emerald-500 focus:outline-none"
-                  >
-                    {subjectsList.map((s) => (
-                      <option key={s} value={s}>{s}</option>
-                    ))}
-                  </select>
-                </div>
+                <SubjectSelector
+                  selectedSubject={formData.subject}
+                  onChangeSubject={(s) => {
+                    setFormData({ ...formData, subject: s });
+                    setModalSubjectFilter(s);
+                    setModalTopicFilter('All');
+                  }}
+                  customSubjects={customSubjects}
+                  onAddCustomSubject={onAddCustomSubject || (() => {})}
+                  label="বিষয় (Subject) *"
+                />
 
                 <div>
                   <label className="block text-slate-300 font-medium mb-1">টার্গেট ক্যাডার (Target Cadre)</label>
@@ -1200,81 +1223,179 @@ export const ModelTestsTab: React.FC<Props> = ({
               {/* QUESTION SELECTION MANAGER */}
               <div className="space-y-3 pt-3 border-t border-slate-800">
                 <div className="flex items-center justify-between flex-wrap gap-2">
-                  <label className="font-semibold text-white text-xs sm:text-sm">
-                    মডেল টেস্টের অন্তর্ভুক্ত প্রশ্নসমূহ ({formData.question_ids.length}টি প্রশ্ন সিলেক্টেড)
+                  <label className="font-semibold text-white text-xs sm:text-sm flex items-center gap-2">
+                    <span>মডেল টেস্টের অন্তর্ভুক্ত প্রশ্নসমূহ</span>
+                    <span className="px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 text-xs border border-emerald-500/30 font-medium">
+                      {formData.question_ids.length}টি প্রশ্ন সিলেক্টেড
+                    </span>
                   </label>
                   <span className="text-[11px] text-emerald-400 font-mono font-medium">
-                    {questions.length}টির মধ্যে {formData.question_ids.length}টি নির্দিষ্ট
+                    মোট {questions.length}টির মধ্যে {formData.question_ids.length}টি নির্দিষ্ট
                   </span>
                 </div>
 
-                {/* Filter & Quick Actions toolbar */}
-                <div className="flex items-center justify-between gap-2 flex-wrap bg-slate-950 p-2.5 rounded-xl border border-slate-800 text-xs">
-                  <div className="flex items-center gap-2">
-                    <span className="text-slate-400 text-[11px]">ফিল্টার:</span>
-                    <select
-                      value={modalSubjectFilter}
-                      onChange={(e) => setModalSubjectFilter(e.target.value)}
-                      className="bg-slate-900 text-slate-200 text-xs rounded-lg px-2.5 py-1 border border-slate-700 focus:border-emerald-500 focus:outline-none"
-                    >
-                      <option value="All">সব বিষয় ({questions.length}টি প্রশ্ন)</option>
-                      {subjectsList.map((s) => {
-                        const count = questions.filter((q) => q.subject === s).length;
-                        return (
-                          <option key={s} value={s}>
-                            {s} ({count}টি)
-                          </option>
-                        );
-                      })}
-                    </select>
-                  </div>
-
-                  <div className="flex items-center gap-1.5 flex-wrap">
-                    <button
-                      type="button"
-                      onClick={() => {
-                        const targetQs = questions.filter(
-                          (q) => modalSubjectFilter === 'All' || q.subject === modalSubjectFilter
-                        );
-                        const targetIds = targetQs.map((q) => String(q.id));
-                        const combined = Array.from(new Set([...formData.question_ids, ...targetIds]));
-                        setFormData({ ...formData, question_ids: combined });
-                      }}
-                      className="px-2.5 py-1 rounded-lg bg-emerald-950/80 hover:bg-emerald-900 text-emerald-300 border border-emerald-700/60 font-medium text-[11px] transition-colors"
-                    >
-                      এই বিষয়ের সব প্রশ্ন সেলেক্ট
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={() => {
-                        const targetQs = questions.filter(
-                          (q) => modalSubjectFilter === 'All' || q.subject === modalSubjectFilter
-                        );
-                        const ten = targetQs.slice(0, 10).map((q) => String(q.id));
-                        setFormData({ ...formData, question_ids: ten });
-                      }}
-                      className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 font-medium text-[11px] transition-colors"
-                    >
-                      ১০টি অটো-সেলেক্ট
-                    </button>
-
-                    {formData.question_ids.length > 0 && (
+                {/* Filter Toolbar with Subject & Topic Buttons */}
+                <div className="bg-slate-950 p-3 rounded-xl border border-slate-800 space-y-3 text-xs">
+                  {/* 1. SUBJECT FILTER BUTTONS */}
+                  <div>
+                    <div className="flex items-center justify-between mb-1.5">
+                      <span className="text-slate-400 font-medium text-[11px] flex items-center gap-1">
+                        <BookOpen className="w-3.5 h-3.5 text-emerald-400" />
+                        বিষয় (Subject) নির্বাচন করুন:
+                      </span>
+                      {(modalSubjectFilter !== 'All' || modalTopicFilter !== 'All') && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setModalSubjectFilter('All');
+                            setModalTopicFilter('All');
+                          }}
+                          className="text-[10px] text-amber-400 hover:text-amber-300 underline"
+                        >
+                          সব রিসেট
+                        </button>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-1.5 overflow-x-auto pb-1.5 scrollbar-thin scrollbar-thumb-slate-800">
                       <button
                         type="button"
-                        onClick={() => setFormData({ ...formData, question_ids: [] })}
-                        className="px-2.5 py-1 rounded-lg bg-rose-950/60 hover:bg-rose-900 text-rose-300 border border-rose-800/60 font-medium text-[11px] transition-colors"
+                        onClick={() => {
+                          setModalSubjectFilter('All');
+                          setModalTopicFilter('All');
+                        }}
+                        className={`px-3 py-1 rounded-lg text-xs font-medium whitespace-nowrap transition-all ${
+                          modalSubjectFilter === 'All'
+                            ? 'bg-emerald-600 text-white font-semibold shadow-sm'
+                            : 'bg-slate-900 text-slate-300 hover:bg-slate-800 border border-slate-800'
+                        }`}
                       >
-                        ক্লিয়ার (0)
+                        সব বিষয় ({questions.length})
                       </button>
-                    )}
+                      {subjectsList.map((s) => {
+                        const count = questions.filter((q) => q.subject === s).length;
+                        const isActive = modalSubjectFilter === s;
+                        return (
+                          <button
+                            key={s}
+                            type="button"
+                            onClick={() => {
+                              setModalSubjectFilter(s);
+                              setModalTopicFilter('All');
+                            }}
+                            className={`px-3 py-1 rounded-lg text-xs font-medium whitespace-nowrap transition-all ${
+                              isActive
+                                ? 'bg-emerald-600 text-white font-semibold shadow-sm'
+                                : 'bg-slate-900 text-slate-300 hover:bg-slate-800 border border-slate-800'
+                            }`}
+                          >
+                            {s} ({count})
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  {/* 2. TOPIC FILTER BUTTONS (if topics exist for current subject selection) */}
+                  {availableTopics.length > 0 && (
+                    <div className="pt-2 border-t border-slate-900">
+                      <div className="flex items-center justify-between mb-1.5">
+                        <span className="text-slate-400 font-medium text-[11px] flex items-center gap-1">
+                          <Layers className="w-3.5 h-3.5 text-amber-400" />
+                          টপিক / অধ্যায় (Topic) নির্বাচন করুন:
+                        </span>
+                        {modalTopicFilter !== 'All' && (
+                          <button
+                            type="button"
+                            onClick={() => setModalTopicFilter('All')}
+                            className="text-[10px] text-slate-400 hover:text-white underline"
+                          >
+                            সব টপিক দেখাও
+                          </button>
+                        )}
+                      </div>
+                      <div className="flex items-center gap-1.5 overflow-x-auto pb-1 scrollbar-thin scrollbar-thumb-slate-800">
+                        <button
+                          type="button"
+                          onClick={() => setModalTopicFilter('All')}
+                          className={`px-2.5 py-1 rounded-lg text-[11px] font-medium whitespace-nowrap transition-all ${
+                            modalTopicFilter === 'All'
+                              ? 'bg-amber-600 text-white font-semibold shadow-sm'
+                              : 'bg-slate-900 text-slate-300 hover:bg-slate-800 border border-slate-800'
+                          }`}
+                        >
+                          সব টপিক
+                        </button>
+                        {availableTopics.map((t) => {
+                          const count = questions.filter(
+                            (q) =>
+                              (modalSubjectFilter === 'All' || q.subject === modalSubjectFilter) &&
+                              q.topic === t
+                          ).length;
+                          const isActive = modalTopicFilter === t;
+                          return (
+                            <button
+                              key={t}
+                              type="button"
+                              onClick={() => setModalTopicFilter(t)}
+                              className={`px-2.5 py-1 rounded-lg text-[11px] font-medium whitespace-nowrap transition-all ${
+                                isActive
+                                  ? 'bg-amber-600 text-white font-semibold shadow-sm'
+                                  : 'bg-slate-900 text-slate-300 hover:bg-slate-800 border border-slate-800'
+                              }`}
+                            >
+                              {t} ({count})
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* 3. QUICK ACTION BUTTONS */}
+                  <div className="flex items-center justify-between gap-2 pt-2 border-t border-slate-900 flex-wrap">
+                    <span className="text-[11px] text-slate-400 font-mono">
+                      ফিল্টারকৃত প্রশ্ন: <strong className="text-emerald-400">{displayedQuestions.length}টি</strong>
+                    </span>
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const targetIds = displayedQuestions.map((q) => String(q.id));
+                          const combined = Array.from(new Set([...formData.question_ids, ...targetIds]));
+                          setFormData({ ...formData, question_ids: combined });
+                        }}
+                        className="px-2.5 py-1 rounded-lg bg-emerald-950/80 hover:bg-emerald-900 text-emerald-300 border border-emerald-700/60 font-medium text-[11px] transition-colors"
+                      >
+                        এই ফিল্টারের সব প্রশ্ন সিলেক্ট
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const ten = displayedQuestions.slice(0, 10).map((q) => String(q.id));
+                          const combined = Array.from(new Set([...formData.question_ids, ...ten]));
+                          setFormData({ ...formData, question_ids: combined });
+                        }}
+                        className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 font-medium text-[11px] transition-colors"
+                      >
+                        ১০টি অটো-সেলেক্ট
+                      </button>
+
+                      {formData.question_ids.length > 0 && (
+                        <button
+                          type="button"
+                          onClick={() => setFormData({ ...formData, question_ids: [] })}
+                          className="px-2.5 py-1 rounded-lg bg-rose-950/60 hover:bg-rose-900 text-rose-300 border border-rose-800/60 font-medium text-[11px] transition-colors"
+                        >
+                          ক্লিয়ার (0)
+                        </button>
+                      )}
+                    </div>
                   </div>
                 </div>
 
                 <div className="max-h-60 overflow-y-auto space-y-2 pr-1 scrollbar-thin scrollbar-thumb-slate-800">
-                  {questions
-                    .filter((q) => modalSubjectFilter === 'All' || q.subject === modalSubjectFilter)
-                    .map((q) => {
+                  {displayedQuestions.map((q) => {
                       const isSelected = formData.question_ids.includes(q.id);
                       const selectedIdx = formData.question_ids.indexOf(q.id);
 
